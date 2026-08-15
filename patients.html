@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>For Patients | Carolina Care</title>
+<meta name="description" content="Request a ride, see an example cost estimate, and learn how Carolina Care's medical transportation works for patients." />
+<link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="index.html" aria-label="Carolina Care home">
+      <svg class="brand-logo" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs><linearGradient id="logoGrad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse"><stop stop-color="#0A2540"/><stop offset="1" stop-color="#1E9E8B"/></linearGradient></defs>
+        <rect width="40" height="40" rx="11" fill="url(#logoGrad)"/>
+        <path d="M10 29C10 29 10 20 16 16C20.5 13 24 13 29 9" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.5 5.5"/>
+        <circle cx="10" cy="29" r="3" fill="#F4793A"/>
+        <circle cx="29" cy="9" r="3" fill="white"/>
+      </svg>
+      <span class="brand-text">Carolina <span>Care</span></span>
+    </a>
+    <nav class="main-nav" aria-label="Primary">
+      <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="patients.html">For Patients</a></li>
+        <li><a href="hospitals.html">For Hospitals</a></li>
+        <li><a href="route-demo.html">Route Demo</a></li>
+        <li><a href="about.html">About</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+    </nav>
+    <div class="header-actions">
+      <a class="phone-link" href="tel:+18002255227">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+        1-800-CALL-CARE
+      </a>
+      <a class="btn btn-primary" href="#request">Request a Ride</a>
+      <button class="hamburger" id="hamburger" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+  <div class="mobile-menu" id="mobile-menu">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="patients.html">For Patients</a></li>
+      <li><a href="hospitals.html">For Hospitals</a></li>
+      <li><a href="route-demo.html">Route Demo</a></li>
+      <li><a href="about.html">About</a></li>
+      <li><a href="contact.html">Contact</a></li>
+    </ul>
+    <a class="mobile-phone" href="tel:+18002255227">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+      1-800-CALL-CARE
+    </a>
+    <a class="btn btn-primary btn-block" href="#request">Request a Ride</a>
+  </div>
+</header>
+
+<div class="mobile-cta-bar">
+  <a class="call" href="tel:+18002255227">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+    Call
+  </a>
+  <a class="request" href="#request">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 12l6-6M3 12l6 6"/></svg>
+    Request Ride
+  </a>
+</div>
+
+<main id="main">
+
+  <section class="page-hero">
+    <div class="container">
+      <span class="eyebrow" style="background:rgba(30,158,139,0.15);color:#7fe0d0">For Patients</span>
+      <h1>Need a Ride to Your Care?</h1>
+      <p>Tell us where you need to go. Carolina Care will help determine available transportation options — no smartphone or internet required.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary btn-lg" href="#request">Request a Ride</a>
+        <a class="btn btn-outline-light btn-lg" href="tel:+18002255227">Call 1-800-CALL-CARE</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Ride Request Form ===== -->
+  <section class="section" id="request">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Ride request</span>
+        <h2>Request a Ride</h2>
+        <p>Fill out the form below and a Carolina Care coordinator will follow up to confirm your trip. Prefer to talk to a person? Call 1-800-CALL-CARE any time.</p>
+      </div>
+
+      <div class="form-card" style="max-width:760px;margin:0 auto;">
+        <form id="ride-form" data-carolina-form="cc_ride_requests" data-success-target="ride-success" novalidate>
+          <h3 style="font-size:1.05rem;margin-bottom:18px;">Patient Information</h3>
+          <div class="form-row">
+            <div class="field" data-field>
+              <label class="field-required" for="rf-first">First name</label>
+              <input id="rf-first" name="first_name" type="text" required autocomplete="given-name" />
+              <span class="error-msg">Please enter your first name.</span>
+            </div>
+            <div class="field" data-field>
+              <label class="field-required" for="rf-last">Last name</label>
+              <input id="rf-last" name="last_name" type="text" required autocomplete="family-name" />
+              <span class="error-msg">Please enter your last name.</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="field" data-field>
+              <label class="field-required" for="rf-phone">Phone number</label>
+              <input id="rf-phone" name="phone" type="tel" required autocomplete="tel" placeholder="(555) 123-4567" />
+              <span class="error-msg">Please enter a valid 10-digit phone number.</span>
+            </div>
+            <div class="field" data-field>
+              <label for="rf-email">Email <span class="hint">(optional)</span></label>
+              <input id="rf-email" name="email" type="email" autocomplete="email" />
+              <span class="error-msg">Please enter a valid email address.</span>
+            </div>
+          </div>
+
+          <h3 style="font-size:1.05rem;margin:28px 0 18px;">Trip Information</h3>
+          <div class="form-row">
+            <div class="field" data-field>
+              <label class="field-required" for="rf-city">Pickup city</label>
+              <input id="rf-city" name="pickup_city" type="text" required />
+              <span class="error-msg">Please enter your pickup city.</span>
+            </div>
+            <div class="field" data-field>
+              <label class="field-required" for="rf-zip">Pickup ZIP code</label>
+              <input id="rf-zip" name="pickup_zip" type="text" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" required />
+              <span class="error-msg">Please enter a valid 5-digit ZIP code.</span>
+            </div>
+          </div>
+          <div class="field" data-field>
+            <label class="field-required" for="rf-destination">Destination hospital or clinic</label>
+            <input id="rf-destination" name="destination" type="text" placeholder="e.g. Charleston Medical Center" required />
+            <span class="error-msg">Please enter your destination.</span>
+          </div>
+          <div class="form-row">
+            <div class="field" data-field>
+              <label class="field-required" for="rf-date">Appointment date</label>
+              <input id="rf-date" name="appointment_date" type="date" required />
+              <span class="error-msg">Please choose an appointment date.</span>
+            </div>
+            <div class="field" data-field>
+              <label class="field-required" for="rf-time">Appointment time</label>
+              <input id="rf-time" name="appointment_time" type="time" required />
+              <span class="error-msg">Please choose an appointment time.</span>
+            </div>
+          </div>
+          <div class="field" data-field>
+            <label class="field-required" for="rf-return">Return ride needed?</label>
+            <select id="rf-return" name="return_ride" required>
+              <option value="">Select an option</option>
+              <option value="yes">Yes, I need a return ride</option>
+              <option value="no">No, one-way trip only</option>
+            </select>
+            <span class="error-msg">Please let us know if you need a return ride.</span>
+          </div>
+
+          <h3 style="font-size:1.05rem;margin:28px 0 12px;">Accessibility Needs <span class="hint">(optional)</span></h3>
+          <div class="check-grid">
+            <div class="check-row">
+              <input type="checkbox" id="rf-wheelchair" name="needs_wheelchair_vehicle" />
+              <label for="rf-wheelchair">Wheelchair accessible vehicle needed</label>
+            </div>
+            <div class="check-row">
+              <input type="checkbox" id="rf-mobility" name="needs_mobility_assistance" />
+              <label for="rf-mobility">Mobility assistance</label>
+            </div>
+            <div class="check-row">
+              <input type="checkbox" id="rf-caregiver" name="traveling_with_caregiver" />
+              <label for="rf-caregiver">Traveling with caregiver</label>
+            </div>
+            <div class="check-row">
+              <input type="checkbox" id="rf-other" name="other_accommodation" />
+              <label for="rf-other">Other transportation accommodation</label>
+            </div>
+          </div>
+
+          <div class="field" data-field style="margin-top:18px;">
+            <label for="rf-notes">Additional notes <span class="hint">(optional)</span></label>
+            <textarea id="rf-notes" name="notes" rows="3" placeholder="Anything else Carolina Care should know about this trip"></textarea>
+          </div>
+
+          <div class="consent-box" data-field>
+            <div class="check-row">
+              <input type="checkbox" id="rf-consent" name="consent" required />
+              <label for="rf-consent">I understand that submitting this form is a transportation request and does not guarantee immediate availability.</label>
+            </div>
+            <span class="error-msg" style="margin-left:30px;">Please confirm you understand before submitting.</span>
+          </div>
+
+          <div class="form-foot">
+            <button class="btn btn-primary btn-lg" type="submit">
+              <span class="spinner"></span>
+              <span class="btn-label">Submit Ride Request</span>
+            </button>
+            <span class="form-note">We'll never sell your information. See our <a class="link-arrow" href="privacy.html" style="display:inline">Privacy Policy</a>.</span>
+          </div>
+        </form>
+
+        <div class="form-success" id="ride-success">
+          <div class="success-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          </div>
+          <h3>Your request has been received.</h3>
+          <p>A Carolina Care coordinator will contact you to confirm your trip.</p>
+          <p class="form-note">Need help sooner? <a class="link-arrow" href="tel:+18002255227" style="display:inline">Call 1-800-CALL-CARE</a>.</p>
+          <button class="btn btn-secondary" type="button" data-reset-form="ride-form">Submit Another Request</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Affordability Calculator ===== -->
+  <section class="section section-alt" id="calculator">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Example Cost Calculator</span>
+        <h2>What Might My Ride Cost?</h2>
+        <p>Carolina Care uses income-sensitive pricing so that transportation remains accessible. This calculator demonstrates how a sliding-scale model could work.</p>
+      </div>
+
+      <div class="calc-wrap">
+        <form id="calc-form" class="form-card" novalidate>
+          <div class="field">
+            <label for="calc-income">Household annual income</label>
+            <input id="calc-income" type="number" min="0" step="1000" placeholder="e.g. 28000" value="24000" />
+          </div>
+          <div class="field">
+            <label for="calc-size">Household size</label>
+            <select id="calc-size">
+              <option value="1">1 person</option>
+              <option value="2" selected>2 people</option>
+              <option value="3">3 people</option>
+              <option value="4">4 people</option>
+              <option value="5">5 people</option>
+              <option value="6">6+ people</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="calc-distance">Estimated trip distance (miles)</label>
+            <input id="calc-distance" type="number" min="0" step="5" placeholder="e.g. 65" value="45" />
+          </div>
+          <p class="form-note" style="margin-top:8px;">We never ask for a Social Security number, FAFSA login, tax documents, or other private financial records — just estimates.</p>
+        </form>
+
+        <div class="calc-result">
+          <span class="tier-label" id="calc-label">Moderate financial need</span>
+          <div class="tier-amount" id="calc-amount">$10–$25</div>
+          <p class="tier-desc" id="calc-desc">This trip could qualify for a reduced, income-based fare.</p>
+          <p class="calc-disclaimer">This is only an estimate. Final ride pricing would be determined during scheduling and may be subsidized by a hospital partner.</p>
+          <a class="btn btn-primary btn-block" href="#request">Request a Ride</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="emergency-note reveal" style="max-width:760px;margin:0 auto;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        <span><strong>Carolina Care is not an ambulance or emergency transportation service.</strong> If you are experiencing a medical emergency, call 911.</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-emergency">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+      Carolina Care is a non-emergency transportation concept. For medical emergencies, call 911.
+    </div>
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="index.html" aria-label="Carolina Care home">
+          <svg class="brand-logo" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs><linearGradient id="logoGradFooter" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse"><stop stop-color="#4f9fe0"/><stop offset="1" stop-color="#1e9e8b"/></linearGradient></defs>
+            <rect width="40" height="40" rx="11" fill="url(#logoGradFooter)"/>
+            <path d="M10 29C10 29 10 20 16 16C20.5 13 24 13 29 9" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.5 5.5"/>
+            <circle cx="10" cy="29" r="3" fill="#f4793a"/>
+            <circle cx="29" cy="9" r="3" fill="white"/>
+          </svg>
+          <span class="brand-text">Carolina Care</span>
+        </a>
+        <p>Healthcare is One Call Away. Medical transportation connecting rural South Carolina to the care patients need.</p>
+        <a class="footer-phone" href="tel:+18002255227">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+          1-800-CALL-CARE
+        </a>
+      </div>
+      <div class="footer-col">
+        <h4>Site</h4>
+        <a href="index.html">Home</a>
+        <a href="patients.html">For Patients</a>
+        <a href="hospitals.html">For Hospitals</a>
+        <a href="route-demo.html">Route Demo</a>
+      </div>
+      <div class="footer-col">
+        <h4>Company</h4>
+        <a href="about.html">About</a>
+        <a href="contact.html">Contact</a>
+        <a href="hospitals.html#partner">Partner With Us</a>
+        <a href="contact.html#advertising">Advertising Inquiry</a>
+      </div>
+      <div class="footer-col">
+        <h4>Get a Ride</h4>
+        <a href="patients.html#request">Request a Ride</a>
+        <a href="patients.html#calculator">Cost Calculator</a>
+        <a href="tel:+18002255227">Call 1-800-CALL-CARE</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; <span data-year></span> Carolina Care. All rights reserved. Demonstration MVP site.</span>
+      <div class="legal-links">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/main.js"></script>
+</body>
+</html>
