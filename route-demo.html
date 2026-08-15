@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Route Demo | Carolina Care</title>
+<meta name="description" content="An interactive demonstration of a Carolina Care route connecting Charleston Medical Center with patients in Aiken, South Carolina." />
+<link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="index.html" aria-label="Carolina Care home">
+      <svg class="brand-logo" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs><linearGradient id="logoGrad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse"><stop stop-color="#0A2540"/><stop offset="1" stop-color="#1E9E8B"/></linearGradient></defs>
+        <rect width="40" height="40" rx="11" fill="url(#logoGrad)"/>
+        <path d="M10 29C10 29 10 20 16 16C20.5 13 24 13 29 9" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.5 5.5"/>
+        <circle cx="10" cy="29" r="3" fill="#F4793A"/>
+        <circle cx="29" cy="9" r="3" fill="white"/>
+      </svg>
+      <span class="brand-text">Carolina <span>Care</span></span>
+    </a>
+    <nav class="main-nav" aria-label="Primary">
+      <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="patients.html">For Patients</a></li>
+        <li><a href="hospitals.html">For Hospitals</a></li>
+        <li><a href="route-demo.html">Route Demo</a></li>
+        <li><a href="about.html">About</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+    </nav>
+    <div class="header-actions">
+      <a class="phone-link" href="tel:+18002255227">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+        1-800-CALL-CARE
+      </a>
+      <a class="btn btn-primary" href="patients.html#request">Request a Ride</a>
+      <button class="hamburger" id="hamburger" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+  <div class="mobile-menu" id="mobile-menu">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="patients.html">For Patients</a></li>
+      <li><a href="hospitals.html">For Hospitals</a></li>
+      <li><a href="route-demo.html">Route Demo</a></li>
+      <li><a href="about.html">About</a></li>
+      <li><a href="contact.html">Contact</a></li>
+    </ul>
+    <a class="mobile-phone" href="tel:+18002255227">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+      1-800-CALL-CARE
+    </a>
+    <a class="btn btn-primary btn-block" href="patients.html#request">Request a Ride</a>
+  </div>
+</header>
+
+<div class="mobile-cta-bar">
+  <a class="call" href="tel:+18002255227">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+    Call
+  </a>
+  <a class="request" href="patients.html#request">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 12l6-6M3 12l6 6"/></svg>
+    Request Ride
+  </a>
+</div>
+
+<main id="main">
+
+  <section class="page-hero">
+    <div class="container">
+      <span class="demo-badge">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        Demonstration Route
+      </span>
+      <h1>From Charleston to Aiken</h1>
+      <p>See how Carolina Care can connect patients across South Carolina with advanced hospital care. This is an illustrative simulation, not live vehicle tracking.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="route-demo-wrap">
+
+        <!-- Visualization -->
+        <div>
+          <div class="route-stage">
+            <svg id="route-svg" viewBox="0 0 800 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Animated map showing a Carolina Care van traveling from Charleston Medical Center to Aiken, South Carolina">
+              <defs>
+                <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#cfe8fb"/>
+                  <stop offset="100%" stop-color="#f2f9fd"/>
+                </linearGradient>
+              </defs>
+              <rect width="800" height="460" fill="url(#skyGrad)"/>
+
+              <!-- terrain layers for depth -->
+              <path d="M0 300 C 160 260, 260 330, 400 300 C 520 276, 620 320, 800 280 L800 460 L0 460 Z" fill="#d8eede"/>
+              <path d="M0 340 C 180 320, 320 360, 460 340 C 580 322, 680 350, 800 330 L800 460 L0 460 Z" fill="#c3e2cf"/>
+              <path d="M0 380 C 200 368, 380 392, 560 378 C 660 370, 730 386, 800 376 L800 460 L0 460 Z" fill="#aed4be"/>
+
+              <!-- subtle grid for pseudo-3d depth -->
+              <g stroke="#0a2540" stroke-width="1" opacity="0.05">
+                <line x1="0" y1="120" x2="800" y2="120"/>
+                <line x1="0" y1="180" x2="800" y2="180"/>
+                <line x1="0" y1="240" x2="800" y2="240"/>
+              </g>
+
+              <!-- road bed (static) -->
+              <path d="M660,340 C 560,378 460,320 400,290 C 330,254 230,254 168,208" stroke="#ffffff" stroke-width="16" fill="none" stroke-linecap="round"/>
+              <path d="M660,340 C 560,378 460,320 400,290 C 330,254 230,254 168,208" stroke="#c7d4e0" stroke-width="16" fill="none" stroke-linecap="round" opacity="0.5" stroke-dasharray="0" />
+              <path d="M660,340 C 560,378 460,320 400,290 C 330,254 230,254 168,208" stroke="#8fa6bb" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="3 10" opacity="0.6"/>
+
+              <!-- progress path (animated reveal) -->
+              <path id="progress-path" d="M660,340 C 560,378 460,320 400,290 C 330,254 230,254 168,208" stroke="#1e9e8b" stroke-width="7" fill="none" stroke-linecap="round"/>
+
+              <!-- pickup pins near Aiken -->
+              <g id="pickup-pins" style="opacity:0;transition:opacity 0.6s ease;">
+                <g transform="translate(215,215)">
+                  <circle r="9" fill="rgba(244,121,58,0.2)"/>
+                  <circle r="4.5" fill="#f4793a"/>
+                </g>
+                <g transform="translate(180,150)">
+                  <circle r="9" fill="rgba(244,121,58,0.2)"/>
+                  <circle r="4.5" fill="#f4793a"/>
+                </g>
+              </g>
+
+              <!-- Charleston marker: hospital -->
+              <g id="marker-charleston" transform="translate(660,340)">
+                <circle id="charleston-pulse" class="pulse-dot" r="18" fill="none" stroke="#0a2540" stroke-width="2"/>
+                <rect x="-26" y="-58" width="52" height="46" rx="4" fill="#ffffff" stroke="#123a63" stroke-width="2"/>
+                <rect x="-18" y="-50" width="10" height="10" fill="#cfe9fb"/>
+                <rect x="-4" y="-50" width="10" height="10" fill="#cfe9fb"/>
+                <rect x="10" y="-50" width="10" height="10" fill="#cfe9fb"/>
+                <rect x="-18" y="-34" width="10" height="10" fill="#cfe9fb"/>
+                <rect x="10" y="-34" width="10" height="10" fill="#cfe9fb"/>
+                <rect x="-5" y="-34" width="10" height="12" fill="#1e9e8b"/>
+                <rect x="-4" y="-68" width="8" height="12" fill="#d64545"/>
+                <rect x="-8" y="-64" width="16" height="4" fill="#d64545"/>
+                <circle r="7" fill="#0a2540"/>
+              </g>
+
+              <!-- Aiken marker: community -->
+              <g id="marker-aiken" transform="translate(140,180)">
+                <circle class="pulse-dot" r="16" fill="none" stroke="#1e9e8b" stroke-width="2"/>
+                <g transform="translate(-14,-4)">
+                  <rect x="-11" y="-8" width="22" height="16" fill="#ffffff" stroke="#123a63" stroke-width="1.5"/>
+                  <path d="M-13 -8 L0 -18 L13 -8" fill="#123a63"/>
+                </g>
+                <g transform="translate(12,-2)">
+                  <rect x="-9" y="-7" width="18" height="14" fill="#eaf3fc" stroke="#123a63" stroke-width="1.5"/>
+                  <path d="M-11 -7 L0 -15 L11 -7" fill="#4f9fe0"/>
+                </g>
+                <circle r="6" fill="#1e9e8b"/>
+              </g>
+
+              <!-- Van -->
+              <g id="van-group" transform="translate(660,340)">
+                <g transform="translate(0,-14) rotate(90)">
+                  <rect x="-24" y="-13" width="48" height="22" rx="5" fill="#f4793a"/>
+                  <rect x="-17" y="-20" width="26" height="11" rx="3" fill="#f4793a"/>
+                  <rect x="-14" y="-18" width="9" height="7" rx="1" fill="#cfe9fb"/>
+                  <rect x="-2" y="-18" width="8" height="7" rx="1" fill="#cfe9fb"/>
+                  <circle cx="-13" cy="10" r="5.5" fill="#0a2540"/>
+                  <circle cx="11" cy="10" r="5.5" fill="#0a2540"/>
+                  <rect x="-24" y="-2" width="48" height="3" fill="#ffffff" opacity="0.6"/>
+                </g>
+              </g>
+
+              <!-- Floating labels -->
+              <g id="label-charleston" class="map-label-toggle">
+                <foreignObject x="560" y="230" width="200" height="40">
+                  <div class="route-map-label" xmlns="http://www.w3.org/1999/xhtml" style="position:static;display:inline-block;">Medical Hub: Charleston</div>
+                </foreignObject>
+              </g>
+              <g id="label-pickup" class="map-label-toggle">
+                <foreignObject x="30" y="245" width="200" height="40">
+                  <div class="route-map-label" xmlns="http://www.w3.org/1999/xhtml" style="position:static;display:inline-block;">Patient Pickup</div>
+                </foreignObject>
+              </g>
+              <g id="label-connected" class="map-label-toggle">
+                <foreignObject x="20" y="95" width="240" height="40">
+                  <div class="route-map-label" xmlns="http://www.w3.org/1999/xhtml" style="position:static;display:inline-block;">Patients Connected to Care</div>
+                </foreignObject>
+              </g>
+
+              <text x="660" y="405" text-anchor="middle" font-size="14" font-weight="800" fill="#0a2540" font-family="Inter, sans-serif">Charleston</text>
+              <text x="140" y="415" text-anchor="middle" font-size="14" font-weight="800" fill="#0a2540" font-family="Inter, sans-serif">Aiken</text>
+            </svg>
+          </div>
+
+          <div class="route-controls">
+            <button class="btn btn-primary btn-lg" id="btn-start" type="button">Start Route</button>
+            <button class="btn btn-teal btn-lg" id="btn-replay" type="button" style="display:none">Replay Route</button>
+            <button class="btn btn-secondary btn-lg" id="btn-return" type="button" style="display:none">Return to Charleston</button>
+          </div>
+        </div>
+
+        <!-- Status panel -->
+        <div>
+          <div class="status-panel reveal">
+            <h3><span class="status-dot" id="status-dot"></span> Current Status</h3>
+            <div class="status-row">
+              <span class="label">Route</span>
+              <span class="value" id="status-route">Charleston → Aiken</span>
+            </div>
+            <div class="status-row">
+              <span class="label">Status</span>
+              <span class="value" id="status-state">Ready</span>
+            </div>
+            <div class="status-row">
+              <span class="label">Patients Scheduled</span>
+              <span class="value" id="status-patients">—</span>
+            </div>
+            <div class="status-row">
+              <span class="label">Vehicle</span>
+              <span class="value">Carolina Care Van 01</span>
+            </div>
+            <div class="status-row">
+              <span class="label">Purpose</span>
+              <span class="value">Specialty Care Transportation</span>
+            </div>
+            <div class="story-box">
+              <p id="story-text">Press "Start Route" to begin the demonstration.</p>
+            </div>
+          </div>
+          <p class="form-note mt-24">Patient counts and timing shown here are illustrative for demonstration purposes only and do not reflect real operational data.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-emergency">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+      Carolina Care is a non-emergency transportation concept. For medical emergencies, call 911.
+    </div>
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="index.html" aria-label="Carolina Care home">
+          <svg class="brand-logo" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs><linearGradient id="logoGradFooter" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse"><stop stop-color="#4f9fe0"/><stop offset="1" stop-color="#1e9e8b"/></linearGradient></defs>
+            <rect width="40" height="40" rx="11" fill="url(#logoGradFooter)"/>
+            <path d="M10 29C10 29 10 20 16 16C20.5 13 24 13 29 9" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.5 5.5"/>
+            <circle cx="10" cy="29" r="3" fill="#f4793a"/>
+            <circle cx="29" cy="9" r="3" fill="white"/>
+          </svg>
+          <span class="brand-text">Carolina Care</span>
+        </a>
+        <p>Healthcare is One Call Away. Medical transportation connecting rural South Carolina to the care patients need.</p>
+        <a class="footer-phone" href="tel:+18002255227">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+          1-800-CALL-CARE
+        </a>
+      </div>
+      <div class="footer-col">
+        <h4>Site</h4>
+        <a href="index.html">Home</a>
+        <a href="patients.html">For Patients</a>
+        <a href="hospitals.html">For Hospitals</a>
+        <a href="route-demo.html">Route Demo</a>
+      </div>
+      <div class="footer-col">
+        <h4>Company</h4>
+        <a href="about.html">About</a>
+        <a href="contact.html">Contact</a>
+        <a href="hospitals.html#partner">Partner With Us</a>
+        <a href="contact.html#advertising">Advertising Inquiry</a>
+      </div>
+      <div class="footer-col">
+        <h4>Get a Ride</h4>
+        <a href="patients.html#request">Request a Ride</a>
+        <a href="patients.html#calculator">Cost Calculator</a>
+        <a href="tel:+18002255227">Call 1-800-CALL-CARE</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; <span data-year></span> Carolina Care. All rights reserved. Demonstration MVP site.</span>
+      <div class="legal-links">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/main.js"></script>
+<script src="assets/js/route-demo.js"></script>
+</body>
+</html>
