@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Carolina Care | Healthcare is One Call Away</title>
+<meta name="description" content="Carolina Care connects rural and underserved South Carolina communities with hospitals and specialists through reliable, affordable medical transportation." />
+<link rel="icon" type="image/svg+xml" href="assets/img/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<!-- ===== Header ===== -->
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="index.html" aria-label="Carolina Care home">
+      <svg class="brand-logo" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs><linearGradient id="logoGrad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse"><stop stop-color="#0A2540"/><stop offset="1" stop-color="#1E9E8B"/></linearGradient></defs>
+        <rect width="40" height="40" rx="11" fill="url(#logoGrad)"/>
+        <path d="M10 29C10 29 10 20 16 16C20.5 13 24 13 29 9" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.5 5.5"/>
+        <circle cx="10" cy="29" r="3" fill="#F4793A"/>
+        <circle cx="29" cy="9" r="3" fill="white"/>
+      </svg>
+      <span class="brand-text">Carolina <span>Care</span></span>
+    </a>
+    <nav class="main-nav" aria-label="Primary">
+      <ul>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="patients.html">For Patients</a></li>
+        <li><a href="hospitals.html">For Hospitals</a></li>
+        <li><a href="route-demo.html">Route Demo</a></li>
+        <li><a href="about.html">About</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+    </nav>
+    <div class="header-actions">
+      <a class="phone-link" href="tel:+18002255227">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+        1-800-CALL-CARE
+      </a>
+      <a class="btn btn-primary" href="patients.html#request">Request a Ride</a>
+      <button class="hamburger" id="hamburger" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+  <div class="mobile-menu" id="mobile-menu">
+    <ul>
+      <li><a href="index.html">Home</a></li>
+      <li><a href="patients.html">For Patients</a></li>
+      <li><a href="hospitals.html">For Hospitals</a></li>
+      <li><a href="route-demo.html">Route Demo</a></li>
+      <li><a href="about.html">About</a></li>
+      <li><a href="contact.html">Contact</a></li>
+    </ul>
+    <a class="mobile-phone" href="tel:+18002255227">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+      1-800-CALL-CARE
+    </a>
+    <a class="btn btn-primary btn-block" href="patients.html#request">Request a Ride</a>
+  </div>
+</header>
+
+<!-- ===== Mobile sticky CTA ===== -->
+<div class="mobile-cta-bar">
+  <a class="call" href="tel:+18002255227">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+    Call
+  </a>
+  <a class="request" href="patients.html#request">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M3 12l6-6M3 12l6 6"/></svg>
+    Request Ride
+  </a>
+</div>
+
+<main id="main">
+
+  <!-- ===== Hero ===== -->
+  <section class="hero">
+    <div class="container hero-grid">
+      <div>
+        <h1>Healthcare is One Call Away</h1>
+        <p class="hero-sub">Connecting rural South Carolina patients with the hospitals and specialists they need.</p>
+        <p class="hero-body">Carolina Care provides reliable medical transportation between underserved communities and major healthcare centers, helping patients reach care before distance becomes another barrier to treatment.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="patients.html#request">Request a Ride</a>
+          <a class="btn btn-outline-light btn-lg" href="tel:+18002255227">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+            Call 1-800-CALL-CARE
+          </a>
+        </div>
+        <a class="hero-tertiary" href="#how-it-works">
+          See How It Works
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+        </a>
+        <div class="badge-row">
+          <span class="stat-chip">No smartphone required</span>
+          <span class="stat-chip">Hospital-supported pricing</span>
+          <span class="stat-chip">Not an ambulance service</span>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div class="hero-scene">
+          <svg viewBox="0 0 520 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Illustration of a Carolina Care van driving a South Carolina road from a rural community to a hospital">
+            <rect width="520" height="420" fill="#dff0fb"/>
+            <g class="cloud-drift" opacity="0.8">
+              <ellipse cx="90" cy="60" rx="42" ry="16" fill="#ffffff"/>
+              <ellipse cx="120" cy="52" rx="30" ry="14" fill="#ffffff"/>
+            </g>
+            <g class="cloud-drift" opacity="0.6" style="animation-delay:-6s">
+              <ellipse cx="400" cy="90" rx="36" ry="14" fill="#ffffff"/>
+            </g>
+            <path d="M0 300 C 120 260, 180 320, 300 280 C 380 254, 440 300, 520 270 L520 420 L0 420 Z" fill="#cfe9d8"/>
+            <path d="M0 340 C 140 310, 220 360, 340 330 C 420 310, 470 340, 520 320 L520 420 L0 420 Z" fill="#bfe0cd"/>
+            <path class="route-dash" d="M40 330 C 140 250, 200 380, 300 300 C 370 245, 420 300, 480 220" stroke="#ffffff" stroke-width="10" fill="none" stroke-linecap="round"/>
+            <path d="M40 330 C 140 250, 200 380, 300 300 C 370 245, 420 300, 480 220" stroke="#0a2540" stroke-width="2" fill="none" stroke-dasharray="1 10" stroke-linecap="round" opacity="0.35"/>
+            <g transform="translate(30,318)">
+              <circle r="8" fill="#0a2540"/>
+              <circle class="pulse-dot" r="8" fill="none" stroke="#0a2540" stroke-width="2"/>
+            </g>
+            <g transform="translate(60,300)">
+              <rect x="-14" y="-10" width="28" height="20" rx="3" fill="#ffffff" stroke="#123a63" stroke-width="1.5"/>
+              <rect x="-10" y="-4" width="20" height="8" fill="#7fb8e6"/>
+              <path d="M-14 0 L14 -14" stroke="#123a63" stroke-width="1.5"/>
+              <text x="0" y="-16" text-anchor="middle" font-size="9" fill="#0a2540" font-weight="700" font-family="Inter, sans-serif">Community</text>
+            </g>
+            <g class="van-float" transform="translate(230,315)">
+              <rect x="-30" y="-16" width="60" height="26" rx="6" fill="#f4793a"/>
+              <rect x="-22" y="-24" width="34" height="14" rx="4" fill="#f4793a"/>
+              <rect x="-19" y="-21" width="12" height="9" rx="1.5" fill="#cfe9fb"/>
+              <rect x="-4" y="-21" width="10" height="9" rx="1.5" fill="#cfe9fb"/>
+              <circle cx="-16" cy="12" r="7" fill="#0a2540"/>
+              <circle cx="14" cy="12" r="7" fill="#0a2540"/>
+              <circle cx="-16" cy="12" r="3" fill="#c9d3dc"/>
+              <circle cx="14" cy="12" r="3" fill="#c9d3dc"/>
+              <rect x="-30" y="-2" width="60" height="4" fill="#ffffff" opacity="0.5"/>
+            </g>
+            <g transform="translate(470,205)">
+              <rect x="-38" y="-52" width="76" height="70" rx="4" fill="#ffffff" stroke="#123a63" stroke-width="2"/>
+              <rect x="-28" y="-42" width="14" height="14" fill="#cfe9fb"/>
+              <rect x="-7" y="-42" width="14" height="14" fill="#cfe9fb"/>
+              <rect x="14" y="-42" width="14" height="14" fill="#cfe9fb"/>
+              <rect x="-28" y="-22" width="14" height="14" fill="#cfe9fb"/>
+              <rect x="14" y="-22" width="14" height="14" fill="#cfe9fb"/>
+              <rect x="-8" y="-22" width="16" height="18" fill="#1e9e8b"/>
+              <rect x="-6" y="-64" width="12" height="16" fill="#d64545"/>
+              <rect x="-11" y="-59" width="22" height="6" fill="#d64545"/>
+              <text x="0" y="-72" text-anchor="middle" font-size="10" fill="#0a2540" font-weight="800" font-family="Inter, sans-serif">Regional Hospital</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Quick Explanation ===== -->
+  <section class="section">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">The idea, in short</span>
+        <h2>How Carolina Care works</h2>
+      </div>
+      <div class="trio-grid">
+        <div class="trio-card reveal">
+          <div class="icon-badge navy">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4.5 8-11.8A8 8 0 0 0 4 10.2C4 17.5 12 22 12 22z"/><circle cx="12" cy="10" r="3"/></svg>
+          </div>
+          <h3>You need care.</h3>
+          <p>You may live hours from the specialist or hospital you need.</p>
+        </div>
+        <div class="trio-card reveal" style="transition-delay:0.08s">
+          <div class="icon-badge teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2-6a2 2 0 0 1 2-1.4h10A2 2 0 0 1 19 7l2 6"/><path d="M5 13h14v5a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><circle cx="7.5" cy="13" r="1.5"/><circle cx="16.5" cy="13" r="1.5"/></svg>
+          </div>
+          <h3>We get you there.</h3>
+          <p>Carolina Care coordinates affordable medical transportation.</p>
+        </div>
+        <div class="trio-card reveal" style="transition-delay:0.16s">
+          <div class="icon-badge accent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h.01M6 16h.01M12 3v3m0 0a4 4 0 0 1 4 4v10H8V10a4 4 0 0 1 4-4z"/><path d="M9 21v-4a3 3 0 0 1 6 0v4"/></svg>
+          </div>
+          <h3>Hospitals help fund the ride.</h3>
+          <p>Hospital partnerships and other revenue sources allow Carolina Care to keep patient costs low.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== How It Works ===== -->
+  <section class="section section-alt" id="how-it-works">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">How it works</span>
+        <h2>From a phone call to the hospital door</h2>
+        <p>Four simple steps — no smartphone or internet connection required.</p>
+      </div>
+      <div class="steps-grid">
+        <div class="step-card reveal">
+          <span class="step-num">1</span>
+          <h3>Call or Request</h3>
+          <p>Patients call 1-800-CALL-CARE or submit the online ride request.</p>
+        </div>
+        <div class="step-card reveal" style="transition-delay:0.06s">
+          <span class="step-num">2</span>
+          <h3>We Coordinate</h3>
+          <p>Carolina Care confirms pickup location, hospital, appointment, travel time, and available route.</p>
+        </div>
+        <div class="step-card reveal" style="transition-delay:0.12s">
+          <span class="step-num">3</span>
+          <h3>We Pick You Up</h3>
+          <p>A Carolina Care vehicle arrives at the scheduled pickup location. Riders traveling the same direction may share routes to reduce cost.</p>
+        </div>
+        <div class="step-card reveal" style="transition-delay:0.18s">
+          <span class="step-num">4</span>
+          <h3>You Reach Care</h3>
+          <p>Patients arrive at the appropriate hospital or specialty center and receive return transportation on their scheduled trip.</p>
+        </div>
+      </div>
+      <div class="text-center mt-24">
+        <a class="btn btn-primary btn-lg" href="patients.html#request">Request a Ride</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Who We Serve ===== -->
+  <section class="section">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Who we serve</span>
+        <h2>Built for patients distance leaves behind</h2>
+      </div>
+      <div class="serve-grid">
+        <div class="serve-card reveal">
+          <div class="icon-badge navy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M17 11l2 2 4-4"/></svg></div>
+          <div><h4>Rural families</h4><p>Households far from advanced medical centers who need a dependable way to get to care.</p></div>
+        </div>
+        <div class="serve-card reveal" style="transition-delay:0.05s">
+          <div class="icon-badge teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/><path d="M9 21v-3M15 21v-3"/></svg></div>
+          <div><h4>Older adults</h4><p>Patients who no longer drive long distances or who need extra support getting to appointments.</p></div>
+        </div>
+        <div class="serve-card reveal" style="transition-delay:0.1s">
+          <div class="icon-badge accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="7" width="15" height="10" rx="2"/><path d="M16 10h3l3 3v4h-6z"/><circle cx="6" cy="19" r="1.6"/><circle cx="18" cy="19" r="1.6"/></svg></div>
+          <div><h4>Patients without reliable vehicles</h4><p>People who don't have a car, or whose only vehicle isn't available when a ride is needed.</p></div>
+        </div>
+        <div class="serve-card reveal" style="transition-delay:0.15s">
+          <div class="icon-badge navy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg></div>
+          <div><h4>Specialist appointments</h4><p>Patients traveling for cardiology, oncology, or other specialty care not available nearby.</p></div>
+        </div>
+        <div class="serve-card reveal" style="transition-delay:0.2s">
+          <div class="icon-badge teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.2-8.56"/><path d="M21 3v6h-6"/></svg></div>
+          <div><h4>Recurring-care patients</h4><p>Dialysis, chemotherapy, and physical therapy patients who need consistent, repeated trips.</p></div>
+        </div>
+        <div class="serve-card reveal" style="transition-delay:0.25s">
+          <div class="icon-badge accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-4.35-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6c-2.5 4.65-9.5 9-9.5 9z"/></svg></div>
+          <div><h4>Patients far from major hospitals</h4><p>Communities located an hour or more from the nearest advanced hospital or medical center.</p></div>
+        </div>
+      </div>
+      <div class="emergency-note reveal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        <span><strong>Carolina Care is not an ambulance or emergency transportation service.</strong> If you are experiencing a medical emergency, call 911.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Route Demo Preview ===== -->
+  <section class="section section-alt">
+    <div class="container route-preview">
+      <div class="route-preview-copy reveal">
+        <span class="eyebrow">Demonstration</span>
+        <h2>See Carolina Care in Motion</h2>
+        <p>Watch a Carolina Care route connect a major Charleston medical center with patients in Aiken — an interactive look at how a scheduled trip comes together.</p>
+        <a class="btn btn-teal btn-lg" href="route-demo.html">Launch Route Demo</a>
+      </div>
+      <div class="mini-route-card reveal" style="transition-delay:0.1s">
+        <svg viewBox="0 0 400 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Preview of the Charleston to Aiken route animation">
+          <path d="M330 200 C 250 220, 180 170, 150 140 C 110 100, 70 100, 40 70" stroke="#1e9e8b" stroke-width="4" fill="none" stroke-linecap="round" stroke-dasharray="2 10" opacity="0.8"/>
+          <g transform="translate(330,200)">
+            <circle r="18" fill="rgba(244,121,58,0.18)"/>
+            <circle r="7" fill="#f4793a"/>
+          </g>
+          <g transform="translate(40,70)">
+            <circle r="18" fill="rgba(30,158,139,0.18)"/>
+            <circle r="7" fill="#1e9e8b"/>
+          </g>
+          <g class="van-float" transform="translate(190,150)">
+            <rect x="-16" y="-9" width="32" height="15" rx="4" fill="#ffffff"/>
+            <rect x="-10" y="-13" width="18" height="8" rx="2" fill="#ffffff"/>
+            <circle cx="-9" cy="7" r="4" fill="#0a2540"/>
+            <circle cx="9" cy="7" r="4" fill="#0a2540"/>
+          </g>
+          <text x="330" y="228" text-anchor="middle" fill="#eaf3fc" font-size="11" font-weight="700" font-family="Inter, sans-serif">Charleston</text>
+          <text x="40" y="50" text-anchor="middle" fill="#eaf3fc" font-size="11" font-weight="700" font-family="Inter, sans-serif">Aiken</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Business Model ===== -->
+  <section class="section">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">How it's funded</span>
+        <h2>A sustainable model, not a donation drive</h2>
+        <p>Hospitals help fund transportation because improving access can help patients reach care earlier. Healthcare advertising provides another revenue source, while patients who can afford to contribute may pay an income-based fare.</p>
+      </div>
+      <div class="model-grid">
+        <div class="info-card model-card reveal">
+          <div class="icon-badge navy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V9l7-5 7 5v12M9 21v-6h6v6"/></svg></div>
+          <h3>Hospital Partnerships</h3>
+          <p>Major hospitals contract with Carolina Care to improve transportation access for patients who live far from advanced care.</p>
+        </div>
+        <div class="info-card model-card reveal" style="transition-delay:0.08s">
+          <div class="icon-badge teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a2 2 0 1 1-3.2 2.4"/></svg></div>
+          <h3>Healthcare Advertising</h3>
+          <p>Healthcare and medical companies can sponsor appropriate advertising inside Carolina Care vehicles.</p>
+        </div>
+        <div class="info-card model-card reveal" style="transition-delay:0.16s">
+          <div class="icon-badge accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+          <h3>Income-Based Fares</h3>
+          <p>Patients who can reasonably contribute may pay an income-based fare, while lower-income patients may receive highly subsidized transportation.</p>
+        </div>
+      </div>
+      <div class="equation reveal">
+        <span class="eq-item">Hospital Partnerships</span>
+        <span class="eq-plus">+</span>
+        <span class="eq-item">Healthcare Advertising</span>
+        <span class="eq-plus">+</span>
+        <span class="eq-item">Patient Contributions</span>
+        <span class="eq-arrow-row">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+        </span>
+        <span class="eq-result">Sustainable Rural Healthcare Transportation</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== CTA Banner ===== -->
+  <section class="section">
+    <div class="container">
+      <div class="cta-banner reveal">
+        <div>
+          <h2>Ready when you are.</h2>
+          <p>Request a ride online, or simply call 1-800-CALL-CARE — no smartphone required.</p>
+        </div>
+        <div class="hero-actions" style="margin-bottom:0">
+          <a class="btn btn-primary btn-lg" href="patients.html#request">Request a Ride</a>
+          <a class="btn btn-outline-light btn-lg" href="tel:+18002255227">Call Now</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ===== Footer ===== -->
+<footer class="site-footer">
+  <div class="container">
+    <div class="footer-emergency">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+      Carolina Care is a non-emergency transportation concept. For medical emergencies, call 911.
+    </div>
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="index.html" aria-label="Carolina Care home">
+          <svg class="brand-logo" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs><linearGradient id="logoGradFooter" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse"><stop stop-color="#4f9fe0"/><stop offset="1" stop-color="#1e9e8b"/></linearGradient></defs>
+            <rect width="40" height="40" rx="11" fill="url(#logoGradFooter)"/>
+            <path d="M10 29C10 29 10 20 16 16C20.5 13 24 13 29 9" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.5 5.5"/>
+            <circle cx="10" cy="29" r="3" fill="#f4793a"/>
+            <circle cx="29" cy="9" r="3" fill="white"/>
+          </svg>
+          <span class="brand-text">Carolina Care</span>
+        </a>
+        <p>Healthcare is One Call Away. Medical transportation connecting rural South Carolina to the care patients need.</p>
+        <a class="footer-phone" href="tel:+18002255227">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.68 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z"/></svg>
+          1-800-CALL-CARE
+        </a>
+      </div>
+      <div class="footer-col">
+        <h4>Site</h4>
+        <a href="index.html">Home</a>
+        <a href="patients.html">For Patients</a>
+        <a href="hospitals.html">For Hospitals</a>
+        <a href="route-demo.html">Route Demo</a>
+      </div>
+      <div class="footer-col">
+        <h4>Company</h4>
+        <a href="about.html">About</a>
+        <a href="contact.html">Contact</a>
+        <a href="hospitals.html#partner">Partner With Us</a>
+        <a href="contact.html#advertising">Advertising Inquiry</a>
+      </div>
+      <div class="footer-col">
+        <h4>Get a Ride</h4>
+        <a href="patients.html#request">Request a Ride</a>
+        <a href="patients.html#calculator">Cost Calculator</a>
+        <a href="tel:+18002255227">Call 1-800-CALL-CARE</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; <span data-year></span> Carolina Care. All rights reserved. Demonstration MVP site.</span>
+      <div class="legal-links">
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/main.js"></script>
+</body>
+</html>
