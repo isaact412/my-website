@@ -1,11 +1,15 @@
 """Starts the bot. Run with:  python -m bot.main"""
 import logging
 import sys
+import time
 
 import discord
 from discord.ext import commands
 
 from bot.config import ConfigError, Settings, load_settings
+from bot.database import repo
+from bot.database.engine import Database
+from bot.database.migrate import upgrade_to_latest
 from bot.logging_setup import setup_logging
 
 log = logging.getLogger("bot")
@@ -13,11 +17,12 @@ log = logging.getLogger("bot")
 # Feature modules ("cogs") to load at startup. We add to this list each phase.
 EXTENSIONS = [
     "bot.commands.general",
+    "bot.commands.owner",
 ]
 
 
 class DiscordAIBot(commands.Bot):
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, db: Database, schema_version: str):
         intents = discord.Intents.default()
         intents.message_content = True  # read message text (enabled in the Developer Portal)
         intents.members = True          # nicknames, joins/leaves (enabled in the Developer Portal)
@@ -29,6 +34,9 @@ class DiscordAIBot(commands.Bot):
             allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True, replied_user=True),
         )
         self.settings = settings
+        self.db = db
+        self.schema_version = schema_version
+        self.started_at = time.monotonic()
 
     async def setup_hook(self) -> None:
         for ext in EXTENSIONS:
@@ -48,7 +56,24 @@ class DiscordAIBot(commands.Bot):
     async def on_ready(self) -> None:
         log.info("Bot connected as %s (id %s)", self.user, self.user.id)
         for guild in self.guilds:
+            await self._remember_guild(guild)
             log.info("In server: %s (id %s)", guild.name, guild.id)
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        log.info("Joined new server: %s (id %s)", guild.name, guild.id)
+        await self._remember_guild(guild)
+
+    async def _remember_guild(self, guild: discord.Guild) -> None:
+        try:
+            async with self.db.session() as s:
+                await repo.upsert_guild(s, guild)
+        except Exception:
+            # A database hiccup should never take the bot down.
+            log.exception("Could not save server %s to the database", guild.id)
+
+    async def close(self) -> None:
+        await super().close()
+        await self.db.close()
 
 
 def main() -> None:
@@ -59,7 +84,14 @@ def main() -> None:
         sys.exit(1)
 
     setup_logging(settings.log_level, secrets=[settings.discord_token])
-    bot = DiscordAIBot(settings)
+
+    try:
+        schema_version = upgrade_to_latest(settings.database_path)
+    except Exception:
+        log.exception("Database migration failed. Your data was backed up in data/backups/ if it existed.")
+        sys.exit(1)
+
+    bot = DiscordAIBot(settings, Database(settings.database_path), schema_version)
 
     try:
         bot.run(settings.discord_token, log_handler=None)

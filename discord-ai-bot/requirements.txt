@@ -1,2 +1,5 @@
 discord.py>=2.7,<3
 python-dotenv>=1.0
+SQLAlchemy[asyncio]>=2.0,<3
+aiosqlite>=0.20
+alembic>=1.13

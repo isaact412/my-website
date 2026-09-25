@@ -1,6 +1,7 @@
 """Loads settings from the .env file and checks they look sane."""
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -15,6 +16,7 @@ class Settings:
     owner_user_id: int
     dev_guild_id: int | None
     log_level: str
+    database_path: Path
 
 
 def _int_or_none(name: str) -> int | None:
@@ -42,4 +44,5 @@ def load_settings() -> Settings:
         owner_user_id=owner,
         dev_guild_id=_int_or_none("DEV_GUILD_ID"),
         log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO",
+        database_path=Path(os.getenv("DATABASE_PATH", "data/bot.db").strip() or "data/bot.db"),
     )

@@ -35,3 +35,4 @@ def setup_logging(level: str, secrets: list[str]) -> None:
 
     # discord.py is very chatty at INFO; keep its noise down
     logging.getLogger("discord").setLevel(logging.WARNING)
+    logging.getLogger("alembic").setLevel(logging.WARNING)  # bot.db logs the migration summary instead
