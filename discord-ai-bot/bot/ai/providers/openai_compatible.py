@@ -71,6 +71,9 @@ class OpenAICompatibleProvider:
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+        if "gpt-oss" in self.model:
+            # Reasoning model: keep its hidden thinking short so replies are fast and cheap on quota.
+            payload["reasoning_effort"] = "low"
         try:
             async with self._session.post(
                 f"{self.cfg.base_url}/chat/completions", json=payload, headers=self._headers()

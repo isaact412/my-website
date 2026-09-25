@@ -38,7 +38,7 @@ class Owner(commands.Cog):
             f"uptime: {uptime_min} min",
             f"servers connected: {len(self.bot.guilds)}",
             f"database: `{self.bot.db.path}` (schema {self.bot.schema_version})",
-            f"rows: {counts['guilds']} guilds, {counts['users']} users",
+            f"rows: {counts['guilds']} guilds, {counts['users']} users, {counts['messages']:,} messages",
             f"python {platform.python_version()} · discord.py {discord.__version__}",
         ]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)

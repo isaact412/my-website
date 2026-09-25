@@ -51,4 +51,13 @@ def style_rules(p: Personality) -> list[str]:
         _pick(p.level("emoji"), "almost never use emoji.", "an emoji now and then.", "emoji are fine."),
         _pick(p.level("weirdness"), "be normal.", "be a little weirdly specific sometimes.",
               "be weirdly specific and oddly committed to bits."),
+        _pick(p.level("raunchiness"),
+              "keep it pretty clean.",
+              "swearing and innuendo are fine.",
+              "this is an adults' group chat: swear freely, be crude, dirty jokes and raunchy humor are welcome."),
+        _pick(p.level("mirroring"),
+              "use your own voice.",
+              "loosely match the chat's vibe.",
+              "talk the way the people in the chat log talk: copy their slang, spelling, swearing, "
+              "caps/lowercase habits and message length. if they're crude, be crude back."),
     ]

@@ -7,7 +7,7 @@ Changing anything here needs a new migration in migrations/versions/.
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -110,3 +110,25 @@ class UsageStat(Base):
     errors: Mapped[int] = mapped_column(Integer, default=0)
     paid_calls: Mapped[int] = mapped_column(Integer, default=0)
     est_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class Message(Base):
+    """A stored Discord message, used for search, stats, recaps and (later) memory.
+
+    Never stored: messages from excluded channels, opted-out users, bots, or DMs.
+    Deleting a message in Discord deletes it here too.
+    Full-text search lives in the messages_fts table (created in migration 0002).
+    """
+
+    __tablename__ = "messages"
+    __table_args__ = (Index("ix_messages_guild_channel_created", "guild_id", "channel_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)  # Discord message ID
+    guild_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("guilds.id", ondelete="CASCADE"))
+    channel_id: Mapped[int] = mapped_column(BigInteger)
+    author_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    reply_to_id: Mapped[int | None] = mapped_column(BigInteger)
+    attachment_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -6,6 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import repo
+from bot.utils.confirm import ask
 
 log = logging.getLogger("bot.commands")
 
@@ -55,14 +56,53 @@ class Admin(commands.Cog):
         ]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-    @usage.error
-    async def usage_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+    @app_commands.command(name="excludechannel", description="(admins) bot stops reading and replying in a channel, and deletes what it stored from it")
+    @app_commands.guild_only()
+    @is_admin()
+    async def excludechannel(self, interaction: discord.Interaction, channel: discord.TextChannel) -> None:
+        async with self.bot.db.session() as s:
+            await repo.set_channel_excluded(s, interaction.guild_id, channel.id, True)
+            deleted = await repo.delete_channel_messages(s, channel.id)
+        self.bot.privacy.excluded_channels.add(channel.id)
+        log.info("Excluded channel %s in guild %s (%d stored messages deleted)", channel.id, interaction.guild_id, deleted)
+        await interaction.response.send_message(
+            f"{channel.mention} is now excluded. i deleted {deleted:,} stored messages from it and won't read or reply there.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="includechannel", description="(admins) let the bot read a previously excluded channel again")
+    @app_commands.guild_only()
+    @is_admin()
+    async def includechannel(self, interaction: discord.Interaction, channel: discord.TextChannel) -> None:
+        async with self.bot.db.session() as s:
+            await repo.set_channel_excluded(s, interaction.guild_id, channel.id, False)
+        self.bot.privacy.excluded_channels.discard(channel.id)
+        log.info("Included channel %s in guild %s", channel.id, interaction.guild_id)
+        await interaction.response.send_message(f"{channel.mention} is included again (new messages only).", ephemeral=True)
+
+    @app_commands.command(name="clearmemory", description="(admins) delete everything the bot stored about this server")
+    @app_commands.guild_only()
+    @is_admin()
+    async def clearmemory(self, interaction: discord.Interaction) -> None:
+        if not await ask(interaction, "this deletes ALL stored messages and nicknames for this server. settings and "
+                                      "opt-outs are kept. can't be undone. sure?", "delete server memory"):
+            return
+        async with self.bot.db.session() as s:
+            deleted = await repo.clear_guild_memory(s, interaction.guild_id)
+        self.bot.ingestor.forget_cached_names(interaction.guild_id)
+        log.info("Cleared memory for guild %s (%d messages) by %s", interaction.guild_id, deleted, interaction.user.id)
+        await interaction.edit_original_response(content=f"done. deleted {deleted:,} stored messages. fresh start.")
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         if isinstance(error, app_commands.CheckFailure):
-            await interaction.response.send_message("admins only", ephemeral=True)
+            msg = "admins only (you need Manage Server)"
         else:
-            log.exception("/usage failed", exc_info=error)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("usage broke. check the logs.", ephemeral=True)
+            log.exception("Admin command failed", exc_info=error)
+            msg = "that broke. check the logs."
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

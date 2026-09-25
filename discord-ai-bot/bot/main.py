@@ -13,7 +13,9 @@ from bot.config import ConfigError, Settings, load_settings, secret_values
 from bot.database import repo
 from bot.database.engine import Database
 from bot.database.migrate import upgrade_to_latest
+from bot.indexing.ingest import Ingestor
 from bot.logging_setup import setup_logging
+from bot.services.privacy import PrivacyState
 from bot.services.responder import Responder
 
 log = logging.getLogger("bot")
@@ -23,6 +25,8 @@ EXTENSIONS = [
     "bot.commands.general",
     "bot.commands.owner",
     "bot.commands.admin",
+    "bot.commands.privacy",
+    "bot.features.search",
     "bot.listeners.messages",
 ]
 
@@ -43,12 +47,15 @@ class DiscordAIBot(commands.Bot):
         self.db = db
         self.schema_version = schema_version
         self.started_at = time.monotonic()
+        self.privacy = PrivacyState(db)
+        self.ingestor = Ingestor(db, self.privacy)
         self.router = AIRouter(settings)
         self.budget = Budget(settings.ai_max_calls_per_minute, settings.ai_daily_call_limit,
                              settings.ai_user_cooldown_seconds)
         self.responder = Responder(self, self.router, self.budget, db, load_personality())
 
     async def setup_hook(self) -> None:
+        await self.privacy.load()
         await self.router.start()
 
         for ext in EXTENSIONS:
@@ -70,6 +77,11 @@ class DiscordAIBot(commands.Bot):
         for guild in self.guilds:
             await self._remember_guild(guild)
             log.info("In server: %s (id %s)", guild.name, guild.id)
+
+    async def on_message(self, message: discord.Message) -> None:
+        # We only use slash commands. Skipping discord.py's "!command" parsing also stops
+        # "@bot yo" from being logged as an unknown command. Chat is handled in bot/listeners/.
+        return
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         log.info("Joined new server: %s (id %s)", guild.name, guild.id)
