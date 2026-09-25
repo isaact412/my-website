@@ -3,3 +3,4 @@ python-dotenv>=1.0
 SQLAlchemy[asyncio]>=2.0,<3
 aiosqlite>=0.20
 alembic>=1.13
+PyYAML>=6.0

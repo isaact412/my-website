@@ -6,11 +6,15 @@ import time
 import discord
 from discord.ext import commands
 
-from bot.config import ConfigError, Settings, load_settings
+from bot.ai.budget import Budget
+from bot.ai.router import AIRouter
+from bot.character.personality import load_personality
+from bot.config import ConfigError, Settings, load_settings, secret_values
 from bot.database import repo
 from bot.database.engine import Database
 from bot.database.migrate import upgrade_to_latest
 from bot.logging_setup import setup_logging
+from bot.services.responder import Responder
 
 log = logging.getLogger("bot")
 
@@ -18,6 +22,8 @@ log = logging.getLogger("bot")
 EXTENSIONS = [
     "bot.commands.general",
     "bot.commands.owner",
+    "bot.commands.admin",
+    "bot.listeners.messages",
 ]
 
 
@@ -37,8 +43,14 @@ class DiscordAIBot(commands.Bot):
         self.db = db
         self.schema_version = schema_version
         self.started_at = time.monotonic()
+        self.router = AIRouter(settings)
+        self.budget = Budget(settings.ai_max_calls_per_minute, settings.ai_daily_call_limit,
+                             settings.ai_user_cooldown_seconds)
+        self.responder = Responder(self, self.router, self.budget, db, load_personality())
 
     async def setup_hook(self) -> None:
+        await self.router.start()
+
         for ext in EXTENSIONS:
             await self.load_extension(ext)
             log.info("Loaded %s", ext)
@@ -73,6 +85,7 @@ class DiscordAIBot(commands.Bot):
 
     async def close(self) -> None:
         await super().close()
+        await self.router.close()
         await self.db.close()
 
 
@@ -83,7 +96,7 @@ def main() -> None:
         print(f"[CONFIG ERROR] {e}")
         sys.exit(1)
 
-    setup_logging(settings.log_level, secrets=[settings.discord_token])
+    setup_logging(settings.log_level, secrets=secret_values(settings))
 
     try:
         schema_version = upgrade_to_latest(settings.database_path)
