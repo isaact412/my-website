@@ -248,7 +248,8 @@ output format:
 - reply with only your chat message. no name prefix, no quotes around it, no explanations.
 - mostly lowercase. no markdown headers, no bullet lists unless someone asked for a list.
 - never say "as an ai" or talk like a customer service bot.
-- never use em dashes. use commas, periods, or "..." like a normal person typing."""
+- never use em dashes. use commas, periods, or "..." like a normal person typing.
+- if an emoji reaction would be funnier than words, reply with only [react:EMOJI] (one emoji)."""
 
 
 def system_prompt(p: Personality, bot_name: str) -> str:
@@ -277,6 +278,7 @@ def build_messages(
     content: str,
     replying_to: tuple[str, str] | None,
     memory_lines: dict[str, list[str]] | None = None,
+    task: str = "write your reply to the new message.",
 ) -> list[ChatMessage]:
     """history: [(author display name, text)], oldest first. Bot's own lines use the name "you"."""
     log_lines = "\n".join(f"{sanitize(name)}: {sanitize(text)}" for name, text in history) or "(quiet)"
@@ -298,8 +300,7 @@ def build_messages(
         f"{memory_block}channel: #{sanitize(channel_name)}\n"
         f"<chat_log>\n{log_lines}\n</chat_log>\n\n"
         f"<new_message author=\"{sanitize(author_name)}\">{sanitize(content) or '(no text)'}</new_message>"
-        f"{reply_note}\n\n"
-        "write your reply to the new message."
+        f"{reply_note}\n\n{task}"
     )
     return [ChatMessage("system", system_prompt(p, bot_name)), ChatMessage("user", user_block)]
 
@@ -597,6 +598,10 @@ class Personality:
 
     def level(self, name: str) -> int:
         return max(0, min(10, int(self.sliders.get(name, 5))))
+
+    def with_overrides(self, overrides: dict[str, int]) -> "Personality":
+        """This server's version: the default sliders with its admin changes on top."""
+        return Personality({**self.sliders, **overrides}, self.character, self.voice_examples)
 
 
 def load_personality(path: Path = DEFAULT_PATH) -> Personality:
@@ -990,6 +995,100 @@ class Owner(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Owner(bot))
+EOF_FILE
+mkdir -p bot/commands
+cat > bot/commands/personality_cmds.py <<'EOF_FILE'
+"""Admin commands for how the bot behaves: /chattiness, /roastlevel, /personality, /resetpersonality."""
+import logging
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from bot.commands.admin import is_admin
+
+log = logging.getLogger("bot.commands")
+
+CHATTINESS_LABELS = {
+    0: "mentions only", 1: "almost silent", 2: "rarely", 3: "occasional (default)", 4: "sometimes",
+    5: "regular participant", 6: "talkative", 7: "very talkative", 8: "chaotic", 9: "unhinged",
+    10: "please god make it stop",
+}
+SLIDERS = ["sarcasm", "chaos", "roasting", "helpfulness", "verbosity", "slang", "emoji", "weirdness",
+           "raunchiness", "mirroring", "callbacks", "reactions"]
+
+
+def _bar(n: int) -> str:
+    return "█" * n + "░" * (10 - n)
+
+
+class PersonalityCommands(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @app_commands.command(name="chattiness", description="(admins) how often the bot joins conversations on its own, 0-10")
+    @app_commands.describe(level="0 = only when mentioned, 3 = default, 10 = absolute menace")
+    @app_commands.guild_only()
+    @is_admin()
+    async def chattiness(self, interaction: discord.Interaction, level: app_commands.Range[int, 0, 10] | None = None) -> None:
+        if level is None:
+            cfg = await self.bot.guild_config.get(interaction.guild_id)
+            await interaction.response.send_message(
+                f"chattiness is **{cfg.chattiness}/10** ({CHATTINESS_LABELS[cfg.chattiness]})", ephemeral=True)
+            return
+        await self.bot.guild_config.update(interaction.guild_id, chattiness=level)
+        log.info("chattiness → %d in guild %s by %s", level, interaction.guild_id, interaction.user.id)
+        await interaction.response.send_message(f"chattiness set to **{level}/10**: {CHATTINESS_LABELS[level]}")
+
+    @app_commands.command(name="roastlevel", description="(admins) how hard the bot roasts people, 0-10")
+    @app_commands.guild_only()
+    @is_admin()
+    async def roastlevel(self, interaction: discord.Interaction, level: app_commands.Range[int, 0, 10]) -> None:
+        cfg = await self.bot.guild_config.get(interaction.guild_id)
+        overrides = {k: v for k, v in cfg.overrides.items() if k != "roasting"}
+        await self.bot.guild_config.update(interaction.guild_id, roast_level=level, overrides=overrides)
+        await interaction.response.send_message(f"roast level set to **{level}/10**" + (" 🔥" if level >= 8 else ""))
+
+    @app_commands.command(name="personality", description="(admins) view the bot's personality sliders, or change one")
+    @app_commands.describe(slider="which trait to change", value="0-10")
+    @app_commands.choices(slider=[app_commands.Choice(name=s, value=s) for s in SLIDERS])
+    @app_commands.guild_only()
+    @is_admin()
+    async def personality(self, interaction: discord.Interaction, slider: app_commands.Choice[str] | None = None,
+                          value: app_commands.Range[int, 0, 10] | None = None) -> None:
+        if slider and value is not None:
+            cfg = await self.bot.guild_config.get(interaction.guild_id)
+            if slider.value == "roasting":
+                await self.bot.guild_config.update(interaction.guild_id, roast_level=value)
+            else:
+                await self.bot.guild_config.update(interaction.guild_id, overrides={**cfg.overrides, slider.value: value})
+            log.info("personality %s → %d in guild %s", slider.value, value, interaction.guild_id)
+        p = await self.bot.responder.personality_for(interaction.guild_id)
+        cfg = await self.bot.guild_config.get(interaction.guild_id)
+        lines = [f"`{s:<12}` {_bar(p.level(s))} {p.level(s)}" for s in SLIDERS]
+        lines.append(f"`{'chattiness':<12}` {_bar(cfg.chattiness)} {cfg.chattiness}")
+        header = f"updated **{slider.value}** to {value}.\n" if slider and value is not None else ""
+        await interaction.response.send_message(header + "\n".join(lines), ephemeral=True)
+
+    @app_commands.command(name="resetpersonality", description="(admins) put every slider back to the default")
+    @app_commands.guild_only()
+    @is_admin()
+    async def resetpersonality(self, interaction: discord.Interaction) -> None:
+        await self.bot.guild_config.update(interaction.guild_id, overrides={}, roast_level=5, chattiness=3)
+        await interaction.response.send_message("personality reset to default. factory settings. lobotomized.")
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        msg = "admins only (you need Manage Server)" if isinstance(error, app_commands.CheckFailure) else "that broke. check the logs."
+        if not isinstance(error, app_commands.CheckFailure):
+            log.exception("Personality command failed", exc_info=error)
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(PersonalityCommands(bot))
 EOF_FILE
 mkdir -p bot/commands
 cat > bot/commands/privacy.py <<'EOF_FILE'
@@ -1955,6 +2054,57 @@ mkdir -p bot/features
 cat > bot/features/__init__.py <<'EOF_FILE'
 EOF_FILE
 mkdir -p bot/features
+cat > bot/features/roast.py <<'EOF_FILE'
+"""/roastme: a roast built from harmless things the server actually knows about you."""
+import logging
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from bot.ai.prompts import build_messages, clean_reply
+from bot.memory import store
+
+log = logging.getLogger("bot.commands")
+
+
+class Roast(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @app_commands.command(name="roastme", description="ask the bot to roast you using actual server lore")
+    @app_commands.guild_only()
+    async def roastme(self, interaction: discord.Interaction) -> None:
+        if self.bot.budget.blocked_reason(interaction.user.id):
+            await interaction.response.send_message("slow down, i'm still recovering from the last one", ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)
+        async with self.bot.db.session() as s:
+            facts = [m.text for m in (await store.about_user(s, interaction.guild_id, interaction.user.id))[:8]]
+        cfg = await self.bot.guild_config.get(interaction.guild_id)
+        name = interaction.user.display_name
+        known = "\n".join(f"- {f}" for f in facts) or "- (you barely know anything about them, roast them for being a mystery)"
+        task = (f"{name} used /roastme and ASKED to be roasted. roast strength: {cfg.roast_level}/10. "
+                f"build it from these real things you know about them:\n{known}\n"
+                "be specific, not generic insults. no attacks on appearance, race, religion, sexuality, "
+                "disability, or anything genuinely hurtful. 1-4 sentences.")
+        personality = await self.bot.responder.personality_for(interaction.guild_id)
+        prompt = build_messages(personality, interaction.guild.me.display_name, getattr(interaction.channel, "name", "?"),
+                                [], name, "/roastme", None, None, task)
+        self.bot.budget.record(interaction.user.id)
+        try:
+            result = await self.bot.router.chat(prompt, max_tokens=300)
+            text = clean_reply(result.text, interaction.guild.me.display_name) or "i tried but you're unroastable. that's worse."
+        except Exception:
+            log.exception("/roastme failed")
+            text = "my brain is buffering rn. consider yourself spared"
+        await interaction.followup.send(text)
+
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(Roast(bot))
+EOF_FILE
+mkdir -p bot/features
 cat > bot/features/search.py <<'EOF_FILE'
 """/search: exact-word search over stored messages. 100% local, no AI."""
 import discord
@@ -2064,8 +2214,8 @@ mkdir -p bot/listeners
 cat > bot/listeners/messages.py <<'EOF_FILE'
 """Watches chat: saves messages locally, and decides when the bot should talk.
 
-Reply rule for now: only when @mentioned or when someone replies to the bot.
-(Spontaneous replies and /chattiness come in Phase 10.)
+Always replies when @mentioned or replied to. Otherwise bot/services/decision.py decides
+(usually: stay quiet, sometimes react, occasionally join in, per /chattiness).
 """
 import logging
 
@@ -2083,19 +2233,24 @@ class MessageListener(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot or message.guild is None:
-            return  # ignore other bots (and ourselves) and DMs
+        if message.guild is None or self.bot.privacy.channel_excluded(message.channel):
+            return  # no DMs; excluded channels: the bot stays completely out of it
+        if message.author.id == self.bot.user.id:
+            self.bot.participation.observe(message)  # remember that we spoke, for pacing
+            return
+        if message.author.bot:
+            return  # ignore other bots
 
-        await self.bot.ingestor.store(message)  # checks exclusions and opt-outs itself
-
-        if self.bot.privacy.channel_excluded(message.channel):
-            return  # excluded channels: the bot stays completely out of it
-        if self._is_addressed_to_me(message):
-            try:
+        await self.bot.ingestor.store(message)  # checks opt-outs itself
+        self.bot.participation.observe(message)
+        try:
+            if self._is_addressed_to_me(message):
                 await self.bot.responder.reply_to(message)
-            except Exception:
-                # One bad message must never crash the bot.
-                log.exception("Reply pipeline failed for message %s", message.id)
+            else:
+                await self.bot.participation.consider(message)
+        except Exception:
+            # One bad message must never crash the bot.
+            log.exception("Reply pipeline failed for message %s", message.id)
 
     def _is_addressed_to_me(self, message: discord.Message) -> bool:
         me = self.bot.user
@@ -2206,6 +2361,8 @@ from bot.logging_setup import setup_logging
 from bot.memory.embeddings import Embedder
 from bot.memory.extractor import MemoryExtractor
 from bot.memory.scanner import Lane, Scanner
+from bot.services.decision import ParticipationEngine
+from bot.services.guild_config import GuildConfigStore
 from bot.services.privacy import PrivacyState
 from bot.services.responder import Responder
 
@@ -2220,6 +2377,8 @@ EXTENSIONS = [
     "bot.features.search",
     "bot.commands.memory_cmds",
     "bot.commands.scan_cmds",
+    "bot.commands.personality_cmds",
+    "bot.features.roast",
     "bot.listeners.messages",
 ]
 
@@ -2241,6 +2400,8 @@ class DiscordAIBot(commands.Bot):
         self.schema_version = schema_version
         self.started_at = time.monotonic()
         self.privacy = PrivacyState(db)
+        self.guild_config = GuildConfigStore(db)
+        self.participation = ParticipationEngine(self)
         self.ingestor = Ingestor(db, self.privacy)
         self.router = AIRouter(settings)
         # Background memory/lore work can use its own free provider (e.g. Ollama) to save the reply quota.
@@ -3315,6 +3476,221 @@ mkdir -p bot/services
 cat > bot/services/__init__.py <<'EOF_FILE'
 EOF_FILE
 mkdir -p bot/services
+cat > bot/services/decision.py <<'EOF_FILE'
+"""Decides when the bot joins a conversation it wasn't invited into, and when it just reacts.
+
+Everything here is free: it runs on every message without any AI call. The AI is only asked
+once this code decides speaking is worth it, and even then the AI may choose to [skip].
+"""
+import asyncio
+import logging
+import random
+import re
+import time
+from collections import defaultdict, deque
+
+import discord
+from sqlalchemy import select
+
+from bot.database.models import Memory
+from bot.services.reactions import pick_reaction
+
+log = logging.getLogger("bot.decision")
+
+# /chattiness level → (base chance to consider a message, max spontaneous replies per channel per hour)
+CHATTINESS = {
+    0: (0.0, 0), 1: (0.004, 1), 2: (0.01, 2), 3: (0.025, 3), 4: (0.04, 4), 5: (0.07, 6),
+    6: (0.1, 8), 7: (0.14, 10), 8: (0.2, 12), 9: (0.27, 15), 10: (0.35, 20),
+}
+MIN_GAP_SECONDS = 45            # never two spontaneous replies in a channel closer than this
+REACTION_GAP_SECONDS = 90       # at most one reaction per channel in this window
+QUESTION_WAIT_SECONDS = 60      # how long a question has to go unanswered
+LORE_REFRESH_SECONDS = 600
+
+SERIOUS = re.compile(
+    r"\b(died|passed away|funeral|hospital|cancer|depress\w*|suicid\w*|self[- ]harm|break ?up|broke up|"
+    r"divorce|not okay|i'?m not ok|panic attack|serious(ly)? though|need help|abuse\w*)\b", re.I)
+LAUGHS = re.compile(r"lmao|lmfao|\blol\b|haha|💀|😭|😂", re.I)
+
+
+class ParticipationEngine:
+    def __init__(self, bot):
+        self.bot = bot
+        self._recent: dict[int, deque] = defaultdict(lambda: deque(maxlen=30))  # channel → (time, author_id, is_me, text)
+        self._spoke: dict[int, deque] = defaultdict(lambda: deque(maxlen=50))   # channel → times the bot spoke on its own
+        self._last_reaction: dict[int, float] = {}
+        self._lore_words: dict[int, set[str]] = {}
+        self._lore_loaded: dict[int, float] = {}
+        self._pending_questions: dict[int, asyncio.Task] = {}
+
+    def observe(self, message: discord.Message) -> None:
+        """Called for every message in a channel the bot is allowed in (including its own)."""
+        self._recent[message.channel.id].append(
+            (time.monotonic(), message.author.id, message.author.id == self.bot.user.id, message.content or ""))
+        # A human reply cancels a pending "nobody answered this question" check in that channel.
+        task = self._pending_questions.get(message.channel.id)
+        if task and not message.author.bot and not task.done() and getattr(task, "asker", None) != message.author.id:
+            task.cancel()
+
+    def note_bot_spoke(self, channel_id: int) -> None:
+        self._spoke[channel_id].append(time.monotonic())
+
+    async def consider(self, message: discord.Message) -> None:
+        """A message nobody addressed to the bot. Maybe react, maybe reply, usually nothing."""
+        cfg = await self.bot.guild_config.get(message.guild.id)
+        personality = self.bot.personality.with_overrides(cfg.overrides)
+        text = message.content or ""
+        if SERIOUS.search(text):
+            return  # read the room
+
+        await self._maybe_react(message, personality.level("reactions"))
+
+        base, per_hour = CHATTINESS.get(cfg.chattiness, CHATTINESS[3])
+        if cfg.chattiness == 0 or not self._under_limits(message.channel.id, per_hour):
+            return
+
+        if text.rstrip().endswith("?") and len(text.split()) >= 3:
+            self._watch_question(message, base)
+
+        score = await self.score(message)
+        chance = min(0.9, base * (1 + max(score, 0))) if score >= 0 else base * 0.2
+        if random.random() < chance:
+            log.info("[DECIDE] joining in #%s (score %.1f, chance %.0f%%)", message.channel.name, score, chance * 100)
+            await self._speak(message)
+
+    async def score(self, message: discord.Message) -> float:
+        """Higher = better moment to chime in. Negative = stay out of it."""
+        text = (message.content or "").lower()
+        me = message.guild.me
+        now = time.monotonic()
+        recent = [r for r in self._recent[message.channel.id] if now - r[0] < 600]
+        s = 0.0
+        if me.display_name.lower() in text or re.search(r"\bthe bot\b|\bbot\b", text):
+            s += 4  # people are talking about the bot
+        if await self._hits_lore(message.guild.id, text):
+            s += 3
+        if sum(1 for r in recent[-6:] if LAUGHS.search(r[3])) >= 2:
+            s += 1.5  # the chat is having fun
+        if any(r[2] for r in recent[-8:]):
+            s += 1    # the bot is already part of this conversation
+        spoke = [t for t in self._spoke[message.channel.id] if now - t < 900]
+        if spoke and now - spoke[-1] < 120:
+            s -= 3
+        if len(spoke) >= 3:
+            s -= 4
+        if len({r[1] for r in recent if not r[2]}) >= 4:
+            s -= 1    # busy chat with lots of people; don't crowd it
+        if len(text.split()) <= 2:
+            s -= 1
+        return s
+
+    def _under_limits(self, channel_id: int, per_hour: int) -> bool:
+        now = time.monotonic()
+        spoke = [t for t in self._spoke[channel_id] if now - t < 3600]
+        if len(spoke) >= per_hour:
+            return False
+        return not spoke or now - spoke[-1] >= MIN_GAP_SECONDS
+
+    async def _maybe_react(self, message: discord.Message, level: int) -> None:
+        if level == 0 or time.monotonic() - self._last_reaction.get(message.channel.id, -1e9) < REACTION_GAP_SECONDS:
+            return
+        emoji = pick_reaction(message.content or "")
+        if emoji and random.random() < level / 10 * 0.25:
+            self._last_reaction[message.channel.id] = time.monotonic()
+            try:
+                await message.add_reaction(emoji)
+                log.info("[DECIDE] reacted %s in #%s", emoji, message.channel.name)
+            except discord.HTTPException:
+                pass
+
+    def _watch_question(self, message: discord.Message, base: float) -> None:
+        old = self._pending_questions.get(message.channel.id)
+        if old and not old.done():
+            old.cancel()
+
+        async def wait_then_answer():
+            await asyncio.sleep(QUESTION_WAIT_SECONDS)
+            cfg = await self.bot.guild_config.get(message.guild.id)
+            _, per_hour = CHATTINESS.get(cfg.chattiness, CHATTINESS[3])
+            if self._under_limits(message.channel.id, per_hour) and random.random() < min(0.8, base * 8):
+                log.info("[DECIDE] answering an ignored question in #%s", message.channel.name)
+                await self._speak(message)
+
+        task = asyncio.create_task(wait_then_answer())
+        task.asker = message.author.id
+        self._pending_questions[message.channel.id] = task
+
+    async def _speak(self, message: discord.Message) -> None:
+        self.note_bot_spoke(message.channel.id)
+        try:
+            await self.bot.responder.reply_to(message, spontaneous=True)
+        except Exception:
+            log.exception("Spontaneous reply failed")
+
+    async def _hits_lore(self, guild_id: int, text: str) -> bool:
+        if time.monotonic() - self._lore_loaded.get(guild_id, -1e9) > LORE_REFRESH_SECONDS:
+            async with self.bot.db.session() as s:
+                rows = await s.execute(select(Memory.title, Memory.keywords).where(
+                    Memory.guild_id == guild_id, Memory.kind == "lore", Memory.active.is_(True),
+                    Memory.times_reinforced >= 2))
+            words = set()
+            for title, keywords in rows:
+                words |= {w for w in (title + " " + keywords).lower().split() if len(w) >= 5}
+            self._lore_words[guild_id] = words
+            self._lore_loaded[guild_id] = time.monotonic()
+        return bool(set(re.findall(r"\w+", text)) & self._lore_words.get(guild_id, set()))
+EOF_FILE
+mkdir -p bot/services
+cat > bot/services/guild_config.py <<'EOF_FILE'
+"""Per-server settings (chattiness, roast level, personality overrides), cached in memory."""
+import json
+from dataclasses import dataclass, field
+
+from bot.database.engine import Database
+from bot.database.models import GuildSettings, utcnow
+
+
+@dataclass
+class GuildConfig:
+    chattiness: int = 3
+    roast_level: int = 5
+    overrides: dict[str, int] = field(default_factory=dict)
+
+
+class GuildConfigStore:
+    def __init__(self, db: Database):
+        self.db = db
+        self._cache: dict[int, GuildConfig] = {}
+
+    async def get(self, guild_id: int) -> GuildConfig:
+        if guild_id not in self._cache:
+            async with self.db.session() as s:
+                row = await s.get(GuildSettings, guild_id)
+            if row is None:
+                self._cache[guild_id] = GuildConfig()
+            else:
+                try:
+                    overrides = {k: int(v) for k, v in json.loads(row.personality_json or "{}").items()}
+                except (ValueError, TypeError):
+                    overrides = {}
+                self._cache[guild_id] = GuildConfig(row.chattiness, row.roast_level, overrides)
+        return self._cache[guild_id]
+
+    async def update(self, guild_id: int, **changes) -> GuildConfig:
+        cfg = await self.get(guild_id)
+        for k, v in changes.items():
+            setattr(cfg, k, v)
+        async with self.db.session() as s:
+            row = await s.get(GuildSettings, guild_id)
+            if row is None:
+                row = GuildSettings(guild_id=guild_id)
+                s.add(row)
+            row.chattiness, row.roast_level = cfg.chattiness, cfg.roast_level
+            row.personality_json = json.dumps(cfg.overrides)
+            row.updated_at = utcnow()
+        return cfg
+EOF_FILE
+mkdir -p bot/services
 cat > bot/services/privacy.py <<'EOF_FILE'
 """In-memory copy of privacy settings, so every message can be checked instantly.
 
@@ -3349,9 +3725,33 @@ class PrivacyState:
         return (guild_id, user_id) in self.opted_out
 EOF_FILE
 mkdir -p bot/services
+cat > bot/services/reactions.py <<'EOF_FILE'
+"""Emoji reactions picked by simple rules. Free: no AI involved."""
+import random
+import re
+
+RULES = [
+    (re.compile(r"lmao|lmfao|\bdead\b|i'?m crying|💀|☠️", re.I), ["💀", "😭"]),
+    (re.compile(r"😭|crying|\bpls\b|please no", re.I), ["😭", "💀"]),
+    (re.compile(r"\bwhat\?+$|\bhuh\b|\bwtf\b|\?\?\?|why would", re.I), ["🤨", "❓"]),
+    (re.compile(r"\b(i'?ll|i will|gonna|on it|trust me|tomorrow)\b", re.I), ["🫡", "🤨"]),
+    (re.compile(r"\b(let'?s go+|w+ |huge w|goated|fire|🔥)\b", re.I), ["🔥"]),
+    (re.compile(r"\b(lost|broke|failed|crashed|died|ratio|\bl\b)\b", re.I), ["💀", "👎"]),
+]
+
+
+def pick_reaction(text: str) -> str | None:
+    for pattern, emojis in RULES:
+        if pattern.search(text):
+            return random.choice(emojis)
+    return None
+EOF_FILE
+mkdir -p bot/services
 cat > bot/services/responder.py <<'EOF_FILE'
 """The reply pipeline: gather context → ask the free AI → clean up → send."""
 import logging
+import random
+import re
 import time
 
 import discord
@@ -3370,6 +3770,7 @@ from bot.services.privacy import PrivacyState
 log = logging.getLogger("bot.ai")
 
 HISTORY_MESSAGES = 12
+_REACT = re.compile(r"\[react:\s*([^\]]{1,32})\]", re.I)
 OFFLINE_NOTICE_EVERY = 300  # seconds; don't spam "brain offline" messages
 
 
@@ -3385,41 +3786,71 @@ class Responder:
         self.privacy = privacy
         self._last_offline_notice: dict[int, float] = {}
 
-    async def reply_to(self, message: discord.Message) -> None:
-        blocked = self.budget.blocked_reason(message.author.id)
+    async def personality_for(self, guild_id: int) -> Personality:
+        cfg = await self.bot.guild_config.get(guild_id)
+        overrides = dict(cfg.overrides)
+        overrides.setdefault("roasting", cfg.roast_level)
+        return self.personality.with_overrides(overrides)
+
+    async def reply_to(self, message: discord.Message, spontaneous: bool = False, task: str | None = None) -> None:
+        """spontaneous=True: nobody asked; the AI may decide to [skip]. task: a special instruction (e.g. /roastme)."""
+        blocked = self.budget.blocked_reason(None if spontaneous else message.author.id)
         if blocked:
             log.info("[AI] skipped reply to %s: %s", message.author.id, blocked)
-            await _safe_react(message, "⏳")
+            if not spontaneous:
+                await _safe_react(message, "⏳")
             return
 
         history, replying_to, participants = await self._context(message)
         me = message.guild.me if message.guild else self.bot.user
         bot_name = me.display_name
         memory_lines = await self._memories(message, history, participants)
+        if task is None:
+            task = ("nobody asked you, you're jumping into the conversation on your own. only say something if it's "
+                    "genuinely funny or useful. if you've got nothing good, reply with exactly [skip]."
+                    if spontaneous else "write your reply to the new message.")
         prompt = build_messages(
-            self.personality, bot_name, getattr(message.channel, "name", "dm"),
-            history, message.author.display_name, message.clean_content, replying_to, memory_lines,
+            await self.personality_for(message.guild.id), bot_name, getattr(message.channel, "name", "dm"),
+            history, message.author.display_name, message.clean_content, replying_to, memory_lines, task,
         )
 
-        self.budget.record(message.author.id)
-        log.info("[AI] reply requested by %s in #%s", message.author.id, getattr(message.channel, "name", "?"))
+        self.budget.record(None if spontaneous else message.author.id)
+        log.info("[AI] %s by %s in #%s", "spontaneous reply" if spontaneous else "reply requested",
+                 message.author.id, getattr(message.channel, "name", "?"))
         try:
-            async with message.channel.typing():
+            if spontaneous:
                 result = await self.router.chat(prompt, max_tokens=300)
+            else:
+                async with message.channel.typing():
+                    result = await self.router.chat(prompt, max_tokens=300)
         except AllProvidersUnavailable:
             await self._usage(message, "none", "none", rate_limited=1)
-            await self._offline_notice(message)
+            if not spontaneous:
+                await self._offline_notice(message)
             return
 
         text = clean_reply(result.text, bot_name)
         await self._usage(message, result.provider, result.model, calls=1,
                           input_tokens=result.input_tokens, output_tokens=result.output_tokens)
-        if not text:
-            log.warning("[AI] %s returned an empty reply", result.provider)
-            await _safe_react(message, "🤨")
+        await self.send(message, text, spontaneous)
+
+    async def send(self, message: discord.Message, text: str, spontaneous: bool) -> None:
+        """Handles the AI's special answers ([skip], [react:X]) and sends normal text."""
+        if not text or text.strip().lower().strip(".") in ("[skip]", "skip"):
+            if not spontaneous:
+                await _safe_react(message, "🤨")
+            log.info("[AI] decided to stay quiet")
             return
+        react = _REACT.fullmatch(text.strip())
+        if react:
+            await _safe_react(message, react.group(1).strip())
+            return
+        text = _REACT.sub("", text).strip()
         try:
-            await message.reply(text, mention_author=False)
+            if spontaneous and random.random() < 0.5:
+                await message.channel.send(text)  # sometimes just talk, like a person would
+            else:
+                await message.reply(text, mention_author=False)
         except discord.HTTPException as e:
             log.warning("Could not send reply: %s", e)
 
@@ -3565,6 +3996,7 @@ sliders:
   raunchiness: 8   # swearing, crude and dirty jokes
   mirroring: 8     # copy the chat's own slang, swearing and typing style
   callbacks: 5     # how often it brings up relevant old lore
+  reactions: 4     # how often it reacts with an emoji instead of talking
 
 # Who the bot is. Written in second person because it's read by the AI.
 character: |
@@ -4116,6 +4548,126 @@ async def test_ollama_cloud_models_are_refused():
             await guard.check(cloud)
 EOF_FILE
 mkdir -p tests
+cat > tests/test_decision.py <<'EOF_FILE'
+"""Participation engine tests: when to talk, when to shut up (fake Discord objects, no network)."""
+import time
+from types import SimpleNamespace
+
+import pytest
+
+from bot.services import decision
+from bot.services.decision import ParticipationEngine
+from bot.services.guild_config import GuildConfig
+from bot.services.reactions import pick_reaction
+from bot.ai.prompts import clean_reply
+
+
+class FakeCfgStore:
+    def __init__(self, chattiness):
+        self.cfg = GuildConfig(chattiness=chattiness)
+
+    async def get(self, gid):
+        return self.cfg
+
+
+class FakeResponder:
+    def __init__(self):
+        self.calls = []
+
+    async def reply_to(self, message, spontaneous=False, task=None):
+        self.calls.append(message.content)
+
+
+class FakeMsg:
+    _next = 0
+
+    def __init__(self, content, author=7):
+        FakeMsg._next += 1
+        self.id = FakeMsg._next
+        self.content = content
+        self.author = SimpleNamespace(id=author, bot=False)
+        self.channel = SimpleNamespace(id=10, name="general")
+        self.guild = SimpleNamespace(id=1, me=SimpleNamespace(display_name="tabchlolaursyd"))
+        self.reactions = []
+
+    async def add_reaction(self, e):
+        self.reactions.append(e)
+
+
+def make_engine(chattiness, monkeypatch, rolls=0.0):
+    from bot.character.personality import Personality
+    bot = SimpleNamespace(user=SimpleNamespace(id=999), guild_config=FakeCfgStore(chattiness),
+                          personality=Personality({"reactions": 0}), responder=FakeResponder())
+    engine = ParticipationEngine(bot)
+    async def no_lore(guild_id, text):
+        return False
+    engine._hits_lore = no_lore
+    monkeypatch.setattr(decision.random, "random", lambda: rolls)
+    return engine, bot
+
+
+@pytest.mark.asyncio
+async def test_chattiness_zero_never_joins(monkeypatch):
+    engine, bot = make_engine(0, monkeypatch, rolls=0.0)
+    for text in ["tabchlolaursyd is so dumb", "what do yall think about the bot"]:
+        m = FakeMsg(text); engine.observe(m); await engine.consider(m)
+    assert bot.responder.calls == []
+
+
+@pytest.mark.asyncio
+async def test_hard_limits_hold_even_at_10(monkeypatch):
+    engine, bot = make_engine(10, monkeypatch, rolls=0.0)  # dice always say yes
+    for i in range(20):
+        m = FakeMsg(f"the bot is talking again number {i}"); engine.observe(m); await engine.consider(m)
+    assert len(bot.responder.calls) == 1  # MIN_GAP_SECONDS stops the rest
+    engine._spoke[10].clear()
+    for _ in range(25):
+        engine._spoke[10].append(time.monotonic() - 3000)  # pretend it already spoke a lot this hour
+    m = FakeMsg("bot bot bot"); engine.observe(m); await engine.consider(m)
+    assert len(bot.responder.calls) == 1  # per-hour cap
+
+
+@pytest.mark.asyncio
+async def test_serious_messages_are_left_alone(monkeypatch):
+    engine, bot = make_engine(10, monkeypatch, rolls=0.0)
+    m = FakeMsg("my grandpa passed away this morning, bot"); engine.observe(m); await engine.consider(m)
+    assert bot.responder.calls == [] and m.reactions == []
+
+
+@pytest.mark.asyncio
+async def test_score_rewards_bot_mentions_and_punishes_recent_talking(monkeypatch):
+    engine, _ = make_engine(3, monkeypatch)
+    about_bot = await engine.score(FakeMsg("honestly the bot has been funny today"))
+    random_chat = await engine.score(FakeMsg("going to the store later"))
+    assert about_bot > random_chat
+    engine.note_bot_spoke(10)
+    assert await engine.score(FakeMsg("honestly the bot has been funny today")) < about_bot
+
+
+def test_reaction_rules_and_special_replies():
+    assert pick_reaction("LMAO he actually did it") in ("💀", "😭")
+    assert pick_reaction("i'll do it tomorrow trust me") in ("🫡", "🤨")
+    assert pick_reaction("going to bed") is None
+    assert clean_reply("[skip]", "bot") == "[skip]"
+
+
+@pytest.mark.asyncio
+async def test_responder_handles_skip_and_react(monkeypatch):
+    from bot.services.responder import Responder
+    sent = []
+
+    class M(FakeMsg):
+        async def reply(self, text, mention_author=False):
+            sent.append(("reply", text))
+    m = M("lol")
+    m.channel.send = None
+    r = Responder.__new__(Responder)
+    await r.send(m, "[skip]", spontaneous=True)
+    await r.send(m, "[react:💀]", spontaneous=True)
+    await r.send(m, "bro what [react:💀]", spontaneous=False)
+    assert m.reactions == ["💀"] and sent == [("reply", "bro what")]
+EOF_FILE
+mkdir -p tests
 cat > tests/test_memory.py <<'EOF_FILE'
 """Memory pipeline tests with a fake AI and a fake embedder (no network)."""
 import json
@@ -4514,7 +5066,7 @@ def test_slash_commands_are_valid():
 
     cmds = asyncio.run(load())
     names = sorted(c.name for c in cmds)
-    assert names == sorted(["ping", "debug", "memorynow", "scanserver", "scanstatus", "pausescan", "resumescan", "stopscan", "remember", "lore", "forget", "whyremember", "usage", "excludechannel", "includechannel", "clearmemory",
+    assert names == sorted(["ping", "debug", "memorynow", "chattiness", "roastlevel", "personality", "resetpersonality", "roastme", "scanserver", "scanstatus", "pausescan", "resumescan", "stopscan", "remember", "lore", "forget", "whyremember", "usage", "excludechannel", "includechannel", "clearmemory",
                             "privacy", "whatdoyouknow", "optout", "optin", "forgetme", "search"])
     for c in cmds:
         assert len(c.description) <= 100 and c.name.islower()

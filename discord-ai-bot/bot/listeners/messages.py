@@ -1,7 +1,7 @@
 """Watches chat: saves messages locally, and decides when the bot should talk.
 
-Reply rule for now: only when @mentioned or when someone replies to the bot.
-(Spontaneous replies and /chattiness come in Phase 10.)
+Always replies when @mentioned or replied to. Otherwise bot/services/decision.py decides
+(usually: stay quiet, sometimes react, occasionally join in, per /chattiness).
 """
 import logging
 
@@ -19,19 +19,24 @@ class MessageListener(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot or message.guild is None:
-            return  # ignore other bots (and ourselves) and DMs
+        if message.guild is None or self.bot.privacy.channel_excluded(message.channel):
+            return  # no DMs; excluded channels: the bot stays completely out of it
+        if message.author.id == self.bot.user.id:
+            self.bot.participation.observe(message)  # remember that we spoke, for pacing
+            return
+        if message.author.bot:
+            return  # ignore other bots
 
-        await self.bot.ingestor.store(message)  # checks exclusions and opt-outs itself
-
-        if self.bot.privacy.channel_excluded(message.channel):
-            return  # excluded channels: the bot stays completely out of it
-        if self._is_addressed_to_me(message):
-            try:
+        await self.bot.ingestor.store(message)  # checks opt-outs itself
+        self.bot.participation.observe(message)
+        try:
+            if self._is_addressed_to_me(message):
                 await self.bot.responder.reply_to(message)
-            except Exception:
-                # One bad message must never crash the bot.
-                log.exception("Reply pipeline failed for message %s", message.id)
+            else:
+                await self.bot.participation.consider(message)
+        except Exception:
+            # One bad message must never crash the bot.
+            log.exception("Reply pipeline failed for message %s", message.id)
 
     def _is_addressed_to_me(self, message: discord.Message) -> bool:
         me = self.bot.user

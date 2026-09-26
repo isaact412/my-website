@@ -16,6 +16,10 @@ class Personality:
     def level(self, name: str) -> int:
         return max(0, min(10, int(self.sliders.get(name, 5))))
 
+    def with_overrides(self, overrides: dict[str, int]) -> "Personality":
+        """This server's version: the default sliders with its admin changes on top."""
+        return Personality({**self.sliders, **overrides}, self.character, self.voice_examples)
+
 
 def load_personality(path: Path = DEFAULT_PATH) -> Personality:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}

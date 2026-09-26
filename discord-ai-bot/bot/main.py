@@ -18,6 +18,8 @@ from bot.logging_setup import setup_logging
 from bot.memory.embeddings import Embedder
 from bot.memory.extractor import MemoryExtractor
 from bot.memory.scanner import Lane, Scanner
+from bot.services.decision import ParticipationEngine
+from bot.services.guild_config import GuildConfigStore
 from bot.services.privacy import PrivacyState
 from bot.services.responder import Responder
 
@@ -32,6 +34,8 @@ EXTENSIONS = [
     "bot.features.search",
     "bot.commands.memory_cmds",
     "bot.commands.scan_cmds",
+    "bot.commands.personality_cmds",
+    "bot.features.roast",
     "bot.listeners.messages",
 ]
 
@@ -53,6 +57,8 @@ class DiscordAIBot(commands.Bot):
         self.schema_version = schema_version
         self.started_at = time.monotonic()
         self.privacy = PrivacyState(db)
+        self.guild_config = GuildConfigStore(db)
+        self.participation = ParticipationEngine(self)
         self.ingestor = Ingestor(db, self.privacy)
         self.router = AIRouter(settings)
         # Background memory/lore work can use its own free provider (e.g. Ollama) to save the reply quota.

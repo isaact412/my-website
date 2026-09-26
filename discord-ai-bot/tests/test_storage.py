@@ -97,7 +97,7 @@ def test_slash_commands_are_valid():
 
     cmds = asyncio.run(load())
     names = sorted(c.name for c in cmds)
-    assert names == sorted(["ping", "debug", "memorynow", "scanserver", "scanstatus", "pausescan", "resumescan", "stopscan", "remember", "lore", "forget", "whyremember", "usage", "excludechannel", "includechannel", "clearmemory",
+    assert names == sorted(["ping", "debug", "memorynow", "chattiness", "roastlevel", "personality", "resetpersonality", "roastme", "scanserver", "scanstatus", "pausescan", "resumescan", "stopscan", "remember", "lore", "forget", "whyremember", "usage", "excludechannel", "includechannel", "clearmemory",
                             "privacy", "whatdoyouknow", "optout", "optin", "forgetme", "search"])
     for c in cmds:
         assert len(c.description) <= 100 and c.name.islower()

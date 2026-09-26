@@ -1,5 +1,7 @@
 """The reply pipeline: gather context → ask the free AI → clean up → send."""
 import logging
+import random
+import re
 import time
 
 import discord
@@ -18,6 +20,7 @@ from bot.services.privacy import PrivacyState
 log = logging.getLogger("bot.ai")
 
 HISTORY_MESSAGES = 12
+_REACT = re.compile(r"\[react:\s*([^\]]{1,32})\]", re.I)
 OFFLINE_NOTICE_EVERY = 300  # seconds; don't spam "brain offline" messages
 
 
@@ -33,41 +36,71 @@ class Responder:
         self.privacy = privacy
         self._last_offline_notice: dict[int, float] = {}
 
-    async def reply_to(self, message: discord.Message) -> None:
-        blocked = self.budget.blocked_reason(message.author.id)
+    async def personality_for(self, guild_id: int) -> Personality:
+        cfg = await self.bot.guild_config.get(guild_id)
+        overrides = dict(cfg.overrides)
+        overrides.setdefault("roasting", cfg.roast_level)
+        return self.personality.with_overrides(overrides)
+
+    async def reply_to(self, message: discord.Message, spontaneous: bool = False, task: str | None = None) -> None:
+        """spontaneous=True: nobody asked; the AI may decide to [skip]. task: a special instruction (e.g. /roastme)."""
+        blocked = self.budget.blocked_reason(None if spontaneous else message.author.id)
         if blocked:
             log.info("[AI] skipped reply to %s: %s", message.author.id, blocked)
-            await _safe_react(message, "⏳")
+            if not spontaneous:
+                await _safe_react(message, "⏳")
             return
 
         history, replying_to, participants = await self._context(message)
         me = message.guild.me if message.guild else self.bot.user
         bot_name = me.display_name
         memory_lines = await self._memories(message, history, participants)
+        if task is None:
+            task = ("nobody asked you, you're jumping into the conversation on your own. only say something if it's "
+                    "genuinely funny or useful. if you've got nothing good, reply with exactly [skip]."
+                    if spontaneous else "write your reply to the new message.")
         prompt = build_messages(
-            self.personality, bot_name, getattr(message.channel, "name", "dm"),
-            history, message.author.display_name, message.clean_content, replying_to, memory_lines,
+            await self.personality_for(message.guild.id), bot_name, getattr(message.channel, "name", "dm"),
+            history, message.author.display_name, message.clean_content, replying_to, memory_lines, task,
         )
 
-        self.budget.record(message.author.id)
-        log.info("[AI] reply requested by %s in #%s", message.author.id, getattr(message.channel, "name", "?"))
+        self.budget.record(None if spontaneous else message.author.id)
+        log.info("[AI] %s by %s in #%s", "spontaneous reply" if spontaneous else "reply requested",
+                 message.author.id, getattr(message.channel, "name", "?"))
         try:
-            async with message.channel.typing():
+            if spontaneous:
                 result = await self.router.chat(prompt, max_tokens=300)
+            else:
+                async with message.channel.typing():
+                    result = await self.router.chat(prompt, max_tokens=300)
         except AllProvidersUnavailable:
             await self._usage(message, "none", "none", rate_limited=1)
-            await self._offline_notice(message)
+            if not spontaneous:
+                await self._offline_notice(message)
             return
 
         text = clean_reply(result.text, bot_name)
         await self._usage(message, result.provider, result.model, calls=1,
                           input_tokens=result.input_tokens, output_tokens=result.output_tokens)
-        if not text:
-            log.warning("[AI] %s returned an empty reply", result.provider)
-            await _safe_react(message, "🤨")
+        await self.send(message, text, spontaneous)
+
+    async def send(self, message: discord.Message, text: str, spontaneous: bool) -> None:
+        """Handles the AI's special answers ([skip], [react:X]) and sends normal text."""
+        if not text or text.strip().lower().strip(".") in ("[skip]", "skip"):
+            if not spontaneous:
+                await _safe_react(message, "🤨")
+            log.info("[AI] decided to stay quiet")
             return
+        react = _REACT.fullmatch(text.strip())
+        if react:
+            await _safe_react(message, react.group(1).strip())
+            return
+        text = _REACT.sub("", text).strip()
         try:
-            await message.reply(text, mention_author=False)
+            if spontaneous and random.random() < 0.5:
+                await message.channel.send(text)  # sometimes just talk, like a person would
+            else:
+                await message.reply(text, mention_author=False)
         except discord.HTTPException as e:
             log.warning("Could not send reply: %s", e)
 

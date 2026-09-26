@@ -30,7 +30,8 @@ output format:
 - reply with only your chat message. no name prefix, no quotes around it, no explanations.
 - mostly lowercase. no markdown headers, no bullet lists unless someone asked for a list.
 - never say "as an ai" or talk like a customer service bot.
-- never use em dashes. use commas, periods, or "..." like a normal person typing."""
+- never use em dashes. use commas, periods, or "..." like a normal person typing.
+- if an emoji reaction would be funnier than words, reply with only [react:EMOJI] (one emoji)."""
 
 
 def system_prompt(p: Personality, bot_name: str) -> str:
@@ -59,6 +60,7 @@ def build_messages(
     content: str,
     replying_to: tuple[str, str] | None,
     memory_lines: dict[str, list[str]] | None = None,
+    task: str = "write your reply to the new message.",
 ) -> list[ChatMessage]:
     """history: [(author display name, text)], oldest first. Bot's own lines use the name "you"."""
     log_lines = "\n".join(f"{sanitize(name)}: {sanitize(text)}" for name, text in history) or "(quiet)"
@@ -80,8 +82,7 @@ def build_messages(
         f"{memory_block}channel: #{sanitize(channel_name)}\n"
         f"<chat_log>\n{log_lines}\n</chat_log>\n\n"
         f"<new_message author=\"{sanitize(author_name)}\">{sanitize(content) or '(no text)'}</new_message>"
-        f"{reply_note}\n\n"
-        "write your reply to the new message."
+        f"{reply_note}\n\n{task}"
     )
     return [ChatMessage("system", system_prompt(p, bot_name)), ChatMessage("user", user_block)]
 

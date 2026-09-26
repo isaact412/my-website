@@ -13,6 +13,7 @@ sliders:
   raunchiness: 8   # swearing, crude and dirty jokes
   mirroring: 8     # copy the chat's own slang, swearing and typing style
   callbacks: 5     # how often it brings up relevant old lore
+  reactions: 4     # how often it reacts with an emoji instead of talking
 
 # Who the bot is. Written in second person because it's read by the AI.
 character: |
