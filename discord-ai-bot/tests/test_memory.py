@@ -279,3 +279,14 @@ async def test_bible_builds_and_feeds_replies(env, tmp_path):
     assert out["bible_people"] == ["ben: the minecraft server necromancer / blames java"]
     assert (tmp_path / "server_bible_1.json").exists()
     assert "leave out health" in router.prompts[0][0].content
+
+
+@pytest.mark.asyncio
+async def test_duplicate_evidence_does_not_crash(env):
+    db, privacy = env
+    ex, _ = extractor_for(db, privacy, [answer(
+        {"kind": "lore", "about": [], "title": "the tube", "text": "someone got stuck in an m&m tube", "evidence": [3, 3, 3]})])
+    assert await ex.run_channel(10) == 1
+    async with db.session() as s:
+        m = (await store.active_memories(s, 1))[0]
+        assert [src.message_id for src in await store.sources(s, m.id)] == [103]

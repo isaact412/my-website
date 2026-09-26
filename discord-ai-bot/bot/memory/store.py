@@ -52,6 +52,7 @@ async def add_sources(s: AsyncSession, memory_id: int, messages) -> None:
     existing = set(await s.scalars(select(MemorySource.message_id).where(MemorySource.memory_id == memory_id)))
     for msg in messages:
         if msg.id not in existing:
+            existing.add(msg.id)  # the AI sometimes cites the same message twice
             s.add(MemorySource(memory_id=memory_id, message_id=msg.id, channel_id=msg.channel_id,
                                author_id=msg.author_id, created_at=msg.created_at))
 
