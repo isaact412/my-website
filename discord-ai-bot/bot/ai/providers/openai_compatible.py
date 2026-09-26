@@ -53,7 +53,8 @@ class OpenAICompatibleProvider:
             return self.model
         available = [m.get("id", "") for m in await self.list_models()]
         if self.name == "ollama":
-            chat = [m for m in available if m and not _NOT_CHAT.search(m)]
+            # Skip ":cloud" models: those run on Ollama's servers, not your Mac.
+            chat = [m for m in available if m and not _NOT_CHAT.search(m) and not is_ollama_cloud(m)]
             if not chat:
                 raise ProviderUnavailable("ollama has no models downloaded yet (run: ollama pull <model>)")
             self.model = chat[0]
@@ -116,6 +117,10 @@ class OpenAICompatibleProvider:
             input_tokens=int(usage.get("prompt_tokens") or 0),
             output_tokens=int(usage.get("completion_tokens") or 0),
         )
+
+
+def is_ollama_cloud(model: str) -> bool:
+    return model.endswith(":cloud") or model.endswith("-cloud")
 
 
 def _retry_after(headers) -> float:

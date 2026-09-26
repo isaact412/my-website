@@ -28,7 +28,11 @@ class FreeGuard:
         """Raises NotFreeError if this call might cost money."""
         if self.allow_paid:
             return
-        if provider.name in LOCAL_PROVIDERS or provider.name in FREE_TIER_ACCOUNT_PROVIDERS:
+        if provider.name in LOCAL_PROVIDERS:
+            if provider.model.endswith(":cloud") or provider.model.endswith("-cloud"):
+                raise NotFreeError(f"ollama model {provider.model!r} runs on Ollama's cloud, not your computer")
+            return
+        if provider.name in FREE_TIER_ACCOUNT_PROVIDERS:
             return
         if provider.name == "openrouter":
             await self._check_openrouter(provider)

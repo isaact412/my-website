@@ -133,7 +133,7 @@ def test_worker_chain_config(monkeypatch):
 async def test_ollama_auto_picks_downloaded_model():
     from aiohttp import web
     async def models(request):
-        return web.json_response({"data": [{"id": "nomic-embed-text:latest"}, {"id": "llama3.1:8b"}]})
+        return web.json_response({"data": [{"id": "glm-5.3-flash:cloud"}, {"id": "nomic-embed-text:latest"}, {"id": "llama3.1:8b"}]})
     app = web.Application(); app.router.add_get("/v1/models", models)
     runner = web.AppRunner(app); await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0); await site.start()
@@ -142,3 +142,16 @@ async def test_ollama_auto_picks_downloaded_model():
     await router.start()
     assert router.providers[0].model == "llama3.1:8b"
     await router.close(); await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ollama_cloud_models_are_refused():
+    import aiohttp
+    from bot.ai.providers.openai_compatible import OpenAICompatibleProvider
+    async with aiohttp.ClientSession() as session:
+        guard = FreeGuard(allow_paid=False)
+        local = OpenAICompatibleProvider(ProviderConfig("ollama", "x", "ollama", "llama3.1:8b"), session)
+        await guard.check(local)
+        cloud = OpenAICompatibleProvider(ProviderConfig("ollama", "x", "ollama", "glm-5.3-flash:cloud"), session)
+        with pytest.raises(NotFreeError):
+            await guard.check(cloud)

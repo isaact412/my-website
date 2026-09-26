@@ -174,7 +174,11 @@ class FreeGuard:
         """Raises NotFreeError if this call might cost money."""
         if self.allow_paid:
             return
-        if provider.name in LOCAL_PROVIDERS or provider.name in FREE_TIER_ACCOUNT_PROVIDERS:
+        if provider.name in LOCAL_PROVIDERS:
+            if provider.model.endswith(":cloud") or provider.model.endswith("-cloud"):
+                raise NotFreeError(f"ollama model {provider.model!r} runs on Ollama's cloud, not your computer")
+            return
+        if provider.name in FREE_TIER_ACCOUNT_PROVIDERS:
             return
         if provider.name == "openrouter":
             await self._check_openrouter(provider)
@@ -408,7 +412,8 @@ class OpenAICompatibleProvider:
             return self.model
         available = [m.get("id", "") for m in await self.list_models()]
         if self.name == "ollama":
-            chat = [m for m in available if m and not _NOT_CHAT.search(m)]
+            # Skip ":cloud" models: those run on Ollama's servers, not your Mac.
+            chat = [m for m in available if m and not _NOT_CHAT.search(m) and not is_ollama_cloud(m)]
             if not chat:
                 raise ProviderUnavailable("ollama has no models downloaded yet (run: ollama pull <model>)")
             self.model = chat[0]
@@ -471,6 +476,10 @@ class OpenAICompatibleProvider:
             input_tokens=int(usage.get("prompt_tokens") or 0),
             output_tokens=int(usage.get("completion_tokens") or 0),
         )
+
+
+def is_ollama_cloud(model: str) -> bool:
+    return model.endswith(":cloud") or model.endswith("-cloud")
 
 
 def _retry_after(headers) -> float:
@@ -4076,7 +4085,7 @@ def test_worker_chain_config(monkeypatch):
 async def test_ollama_auto_picks_downloaded_model():
     from aiohttp import web
     async def models(request):
-        return web.json_response({"data": [{"id": "nomic-embed-text:latest"}, {"id": "llama3.1:8b"}]})
+        return web.json_response({"data": [{"id": "glm-5.3-flash:cloud"}, {"id": "nomic-embed-text:latest"}, {"id": "llama3.1:8b"}]})
     app = web.Application(); app.router.add_get("/v1/models", models)
     runner = web.AppRunner(app); await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0); await site.start()
@@ -4085,6 +4094,19 @@ async def test_ollama_auto_picks_downloaded_model():
     await router.start()
     assert router.providers[0].model == "llama3.1:8b"
     await router.close(); await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ollama_cloud_models_are_refused():
+    import aiohttp
+    from bot.ai.providers.openai_compatible import OpenAICompatibleProvider
+    async with aiohttp.ClientSession() as session:
+        guard = FreeGuard(allow_paid=False)
+        local = OpenAICompatibleProvider(ProviderConfig("ollama", "x", "ollama", "llama3.1:8b"), session)
+        await guard.check(local)
+        cloud = OpenAICompatibleProvider(ProviderConfig("ollama", "x", "ollama", "glm-5.3-flash:cloud"), session)
+        with pytest.raises(NotFreeError):
+            await guard.check(cloud)
 EOF_FILE
 mkdir -p tests
 cat > tests/test_memory.py <<'EOF_FILE'
