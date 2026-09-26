@@ -14,12 +14,14 @@ from bot.database import repo
 from bot.database.engine import Database
 from bot.memory import store
 from bot.memory.embeddings import Embedder
+from bot.memory.recall import recall_messages
 from bot.memory.retrieval import relevant_memories
 from bot.services.privacy import PrivacyState
 
 log = logging.getLogger("bot.ai")
 
-HISTORY_MESSAGES = 12
+HISTORY_MESSAGES = 40      # recent messages the bot reads before replying
+RECALL_MESSAGES = 8        # old messages pulled back from the full history
 _REACT = re.compile(r"\[react:\s*([^\]]{1,32})\]", re.I)
 OFFLINE_NOTICE_EVERY = 300  # seconds; don't spam "brain offline" messages
 
@@ -107,7 +109,7 @@ class Responder:
     async def _memories(self, message: discord.Message, history, participants: list[int]) -> dict[str, list[str]]:
         """A few relevant memories about the people talking, plus maybe one callback."""
         try:
-            conversation = " ".join(text for _, text in history[-6:]) + " " + message.clean_content
+            conversation = " ".join(text for _, text in history[-8:]) + " " + message.clean_content
             async with self.db.session() as s:
                 found = await relevant_memories(
                     s, self.embedder, message.guild.id, participants, conversation,
@@ -115,6 +117,11 @@ class Responder:
                     opted_out=lambda uid: self.privacy.user_opted_out(message.guild.id, uid),
                 )
                 await store.mark_referenced(s, [m.id for m in found["lore"]])
+                public = {c.id for c in message.guild.text_channels
+                          if c.permissions_for(message.guild.default_role).read_message_history
+                          and not self.privacy.channel_excluded(c)}
+                recalled = await recall_messages(s, message.guild.id, conversation, public,
+                                                 message.channel.id, RECALL_MESSAGES)
         except Exception:
             log.exception("Memory lookup failed; replying without memory")
             return {}
@@ -123,9 +130,11 @@ class Responder:
             names = [self._name(message.guild, uid) for uid in store.subject_ids(m)]
             people.append(f"{' & '.join(names)}: {m.text}")
         lore = [f"{m.title}: {m.text}" if m.title else m.text for m in found["lore"]]
-        if people or lore:
-            log.info("[MEMORY] using %d people memories, %d lore", len(people), len(lore))
-        return {"people": people, "lore": lore}
+        background = [f"{m.title}: {m.text}" if m.title else m.text for m in found["background"]]
+        recall = [f"{self._name(message.guild, m.author_id)} ({m.created_at:%b %Y}): {m.content}" for m in recalled]
+        log.info("[MEMORY] context: %d people memories, %d lore, %d background lore, %d recalled messages",
+                 len(people), len(lore), len(background), len(recall))
+        return {"people": people, "lore": lore, "background": background, "recall": recall}
 
     @staticmethod
     def _name(guild: discord.Guild, user_id: int) -> str:

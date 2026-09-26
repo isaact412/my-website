@@ -8,19 +8,21 @@ from bot.memory import store
 from bot.memory.embeddings import Embedder, from_blob
 from bot.memory.strength import strength
 
-MAX_PEOPLE_MEMORIES = 6
-MAX_LORE = 2
-LORE_MIN_RELEVANCE = 0.55       # lore must actually relate to the conversation
-CALLBACK_COOLDOWN = timedelta(hours=6)
+MAX_PEOPLE_MEMORIES = 12
+MAX_LORE = 4
+LORE_MIN_RELEVANCE = 0.5        # lore must actually relate to the conversation
+STRONG_RELEVANCE = 0.65         # this relevant = always include (no dice roll)
+CALLBACK_COOLDOWN = timedelta(hours=2)
+BACKGROUND_LORE = 3             # a few of the server's greatest hits, so the bot always "knows the server"
 
 
 async def relevant_memories(s, embedder: Embedder, guild_id: int, participant_ids: list[int],
                             conversation: str, callback_chance: float, opted_out) -> dict[str, list]:
-    """Returns {"people": [...], "lore": [...]} of Memory rows."""
+    """Returns {"people": [...], "lore": [...], "background": [...]} of Memory rows."""
     memories = [m for m in await store.active_memories(s, guild_id)
                 if not any(opted_out(uid) for uid in store.subject_ids(m))]
     if not memories:
-        return {"people": [], "lore": []}
+        return {"people": [], "lore": [], "background": []}
 
     qv = (await embedder.embed([conversation[-1500:]]) or [None])[0]
     words = set(conversation.lower().split())
@@ -48,10 +50,18 @@ async def relevant_memories(s, embedder: Embedder, guild_id: int, participant_id
         recent = m.last_referenced and (now - _aware(m.last_referenced)) < CALLBACK_COOLDOWN
         if rel >= LORE_MIN_RELEVANCE and not recent:
             lore.append((rel + 0.2 * strength(m, now), m))
-    lore = [m for _, m in sorted(lore, key=lambda x: x[0], reverse=True)[:MAX_LORE]]
-    if lore and random.random() > callback_chance:
+    ranked = sorted(lore, key=lambda x: x[0], reverse=True)[:MAX_LORE]
+    strong = [m for score, m in ranked if score >= STRONG_RELEVANCE]
+    lore = [m for _, m in ranked]
+    if lore and not strong and random.random() > callback_chance:
         lore = []
-    return {"people": people, "lore": lore}
+
+    # Background: a few random picks from the strongest lore, so the bot always has the server's vibe.
+    used = {m.id for m in lore}
+    top = sorted((m for m in memories if m.kind == "lore" and m.id not in used),
+                 key=lambda m: strength(m, now), reverse=True)[:15]
+    background = random.sample(top, min(BACKGROUND_LORE, len(top)))
+    return {"people": people, "lore": lore, "background": background}
 
 
 def _aware(dt: datetime) -> datetime:

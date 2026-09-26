@@ -68,12 +68,19 @@ def build_messages(
     if replying_to:
         reply_note = f'\n(they are replying to {sanitize(replying_to[0])}: "{sanitize(replying_to[1])}")'
     memory_block = ""
-    if memory_lines and (memory_lines.get("people") or memory_lines.get("lore")):
+    if memory_lines and any(memory_lines.get(k) for k in ("people", "lore", "background", "recall")):
         parts = []
         if memory_lines.get("people"):
             parts.append("people here:\n" + "\n".join(f"- {sanitize(x)}" for x in memory_lines["people"]))
         if memory_lines.get("lore"):
             parts.append("possibly relevant server lore:\n" + "\n".join(f"- {sanitize(x)}" for x in memory_lines["lore"]))
+        if memory_lines.get("background"):
+            parts.append("server lore you just know (background, don't force it):\n"
+                         + "\n".join(f"- {sanitize(x)}" for x in memory_lines["background"]))
+        if memory_lines.get("recall"):
+            parts.append("real old messages from this server related to what's being said now "
+                         "(great for callbacks if they genuinely fit):\n"
+                         + "\n".join(f"- {sanitize(x)}" for x in memory_lines["recall"]))
         memory_block = (
             "<memory>\nthings you remember from past chats (may be outdated). use them naturally like a friend would. "
             "never list them, and don't force a callback unless it genuinely fits.\n" + "\n\n".join(parts) + "\n</memory>\n\n"

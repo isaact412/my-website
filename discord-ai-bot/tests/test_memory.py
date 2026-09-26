@@ -177,3 +177,23 @@ async def test_purge_removes_already_saved_sensitive_memories(env):
     async with db.session() as s:
         assert await store.purge_sensitive(s) == 1
         assert [m.text for m in await store.about_user(s, 1, 7)] == ["jalen runs the madden league"]
+
+
+@pytest.mark.asyncio
+async def test_recall_finds_old_public_messages_only(env):
+    from datetime import timedelta
+    from bot.memory.recall import keywords, recall_messages
+    db, _ = env
+    old = datetime.now(timezone.utc) - timedelta(days=200)
+    async with db.session() as s:
+        for mid, ch, text in [(900, 10, "the minecraft server crashed again and ben blamed java"),
+                              (901, 99, "secret minecraft plans in the private channel"),
+                              (902, 10, "costco hot dogs are elite honestly")]:
+            await repo.store_message(s, SimpleNamespace(
+                id=mid, guild=SimpleNamespace(id=1), channel=SimpleNamespace(id=ch), author=SimpleNamespace(id=9),
+                content=text, reference=None, attachments=[], created_at=old, edited_at=None))
+    assert "minecraft" in keywords("yo we should make a minecraft server lol")
+    async with db.session() as s:
+        found = await recall_messages(s, 1, "we should make a minecraft server", {10}, 10)
+    texts = [m.content for m in found]
+    assert any("crashed again" in t for t in texts) and not any("private" in t for t in texts)
