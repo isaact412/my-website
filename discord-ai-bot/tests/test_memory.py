@@ -217,3 +217,25 @@ async def test_recall_finds_old_public_messages_only(env):
         found = await recall_messages(s, 1, "we should make a minecraft server", {10}, 10)
     texts = [m.content for m in found]
     assert any("crashed again" in t for t in texts) and not any("private" in t for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_voice_samples_real_lines_and_laugh_hits(env):
+    from bot.memory.voice import VoiceSampler
+    db, _ = env
+    convo = [(7, "ben really microwaved the banana again"), (8, "LMAO 💀"), (9, "why is he like this"),
+             (9, "https://tenor.com/some-gif"), (7, "the claw knows what you did"), (8, "ok"), (9, "sure")]
+    async with db.session() as s:
+        for i, (author, text) in enumerate(convo):
+            await repo.store_message(s, SimpleNamespace(
+                id=5000 + i, guild=SimpleNamespace(id=1), channel=SimpleNamespace(id=10),
+                author=SimpleNamespace(id=author), content=text, reference=None, attachments=[],
+                created_at=datetime.now(timezone.utc), edited_at=None))
+        out = await VoiceSampler().samples(s, 1, [7], {10}, lambda uid: NAMES[uid])
+    assert out["people"] and all(line.startswith("alex: ") for line in out["people"])
+    assert "alex: ben really microwaved the banana again" in out["hits"]
+    assert not any("tenor" in l for l in out["people"] + out["hits"])
+    msgs = __import__("bot.ai.prompts", fromlist=["build_messages"]).build_messages(
+        __import__("bot.character.personality", fromlist=["load_personality"]).load_personality(),
+        "bot", "general", [], "alex", "yo", None, {"voice_people": out["people"], "voice_hits": out["hits"]})
+    assert "<how_people_talk>" in msgs[1].content and msgs[1].content.count("</how_people_talk>") == 1

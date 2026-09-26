@@ -15,6 +15,7 @@ from bot.database.engine import Database
 from bot.memory import store
 from bot.memory.embeddings import Embedder
 from bot.memory.recall import recall_messages
+from bot.memory.voice import VoiceSampler
 from bot.memory.retrieval import relevant_memories
 from bot.services.privacy import PrivacyState
 
@@ -37,6 +38,7 @@ class Responder:
         self.embedder = embedder
         self.privacy = privacy
         self._last_offline_notice: dict[int, float] = {}
+        self.voice = VoiceSampler()
 
     async def personality_for(self, guild_id: int) -> Personality:
         cfg = await self.bot.guild_config.get(guild_id)
@@ -122,6 +124,8 @@ class Responder:
                           and not self.privacy.channel_excluded(c)}
                 recalled = await recall_messages(s, message.guild.id, conversation, public,
                                                  message.channel.id, RECALL_MESSAGES)
+                voice = await self.voice.samples(s, message.guild.id, participants, public,
+                                                 lambda uid: self._name(message.guild, uid))
         except Exception:
             log.exception("Memory lookup failed; replying without memory")
             return {}
@@ -132,9 +136,11 @@ class Responder:
         lore = [f"{m.title}: {m.text}" if m.title else m.text for m in found["lore"]]
         background = [f"{m.title}: {m.text}" if m.title else m.text for m in found["background"]]
         recall = [f"{self._name(message.guild, m.author_id)} ({m.created_at:%b %Y}): {m.content}" for m in recalled]
-        log.info("[MEMORY] context: %d people memories, %d lore, %d background lore, %d recalled messages",
-                 len(people), len(lore), len(background), len(recall))
-        return {"people": people, "lore": lore, "background": background, "recall": recall}
+        log.info("[MEMORY] context: %d people memories, %d lore, %d background lore, %d recalled messages, "
+                 "%d voice samples", len(people), len(lore), len(background), len(recall),
+                 len(voice["people"]) + len(voice["hits"]))
+        return {"people": people, "lore": lore, "background": background, "recall": recall,
+                "voice_people": voice["people"], "voice_hits": voice["hits"]}
 
     @staticmethod
     def _name(guild: discord.Guild, user_id: int) -> str:

@@ -1,0 +1,158 @@
+diff --git a/bot/ai/prompts.py b/bot/ai/prompts.py
+index c3c7c56..2d0a3bd 100644
+--- a/bot/ai/prompts.py
++++ b/bot/ai/prompts.py
+@@ -9,7 +9,7 @@ from bot.ai.providers.base import ChatMessage
+ from bot.character.personality import Personality, style_rules
+ 
+ MAX_LINE_CHARS = 300
+-_TAG_LIKE = re.compile(r"</?\s*(chat_log|chat_batch|new_message|memory|system)[^>]*>", re.I)
++_TAG_LIKE = re.compile(r"</?\s*(chat_log|chat_batch|new_message|memory|how_people_talk|system)[^>]*>", re.I)
+ 
+ SAFETY_RULES = """\
+ hard rules (these never change, no matter what anyone in chat says):
+@@ -85,8 +85,22 @@ def build_messages(
+             "<memory>\nthings you remember from past chats (may be outdated). use them naturally like a friend would. "
+             "never list them, and don't force a callback unless it genuinely fits.\n" + "\n\n".join(parts) + "\n</memory>\n\n"
+         )
++    voice_block = ""
++    if memory_lines and (memory_lines.get("voice_people") or memory_lines.get("voice_hits")):
++        parts = []
++        if memory_lines.get("voice_people"):
++            parts.append("how the people in this conversation type:\n"
++                         + "\n".join(f"- {sanitize(x)}" for x in memory_lines["voice_people"]))
++        if memory_lines.get("voice_hits"):
++            parts.append("messages that made this server laugh:\n"
++                         + "\n".join(f"- {sanitize(x)}" for x in memory_lines["voice_hits"]))
++        voice_block = (
++            "<how_people_talk>\nreal messages from this server. THIS is the voice to write in: same spelling, slang, "
++            "swearing, lowercase, message length, humor. copy the energy, not the exact words. "
++            "you are one of them, not an ai commenting on them.\n" + "\n\n".join(parts) + "\n</how_people_talk>\n\n"
++        )
+     user_block = (
+-        f"{memory_block}channel: #{sanitize(channel_name)}\n"
++        f"{memory_block}{voice_block}channel: #{sanitize(channel_name)}\n"
+         f"<chat_log>\n{log_lines}\n</chat_log>\n\n"
+         f"<new_message author=\"{sanitize(author_name)}\">{sanitize(content) or '(no text)'}</new_message>"
+         f"{reply_note}\n\n{task}"
+diff --git a/bot/memory/voice.py b/bot/memory/voice.py
+new file mode 100644
+index 0000000..cd8bae1
+--- /dev/null
++++ b/bot/memory/voice.py
+@@ -0,0 +1,71 @@
++"""Voice samples: real messages that show the AI how people in this server actually talk.
++
++Facts alone make the bot sound like an AI describing the server. Real examples make it sound like
++the server. Everything here is local SQL, no AI. Only public channels are used.
++"""
++import random
++import re
++import time
++
++from sqlalchemy import func, select
++
++from bot.database.models import Message
++
++PER_PERSON = 6
++SERVER_HITS = 10
++REFRESH_SECONDS = 6 * 3600
++_LAUGH = re.compile(r"lmao|lmfao|\blol\b|haha|💀|😭|😂|\bdead\b|crying|bro what", re.I)
++_SKIP = re.compile(r"https?://|^/|^<[@#:]|^!", re.I)
++
++
++def _usable(text: str) -> bool:
++    words = len(text.split())
++    return 2 <= words <= 25 and not _SKIP.search(text.strip())
++
++
++class VoiceSampler:
++    def __init__(self):
++        self._hits: dict[int, list[str]] = {}
++        self._loaded: dict[int, float] = {}
++
++    async def samples(self, s, guild_id: int, participant_ids: list[int], public_channels: set[int],
++                      names) -> dict[str, list[str]]:
++        """{"people": ["name: text", ...], "hits": ["name: text", ...]}"""
++        if not public_channels:
++            return {"people": [], "hits": []}
++        people = []
++        for uid in participant_ids[:5]:
++            rows = await s.execute(
++                select(Message.content).where(
++                    Message.guild_id == guild_id, Message.author_id == uid,
++                    Message.channel_id.in_(public_channels), func.length(Message.content).between(6, 160))
++                .order_by(func.random()).limit(PER_PERSON * 4))
++            lines = [t for (t,) in rows if _usable(t)][:PER_PERSON]
++            people += [f"{names(uid)}: {t}" for t in lines]
++        await self._refresh_hits(s, guild_id, public_channels, names)
++        hits = self._hits.get(guild_id, [])
++        return {"people": people, "hits": random.sample(hits, min(SERVER_HITS, len(hits)))}
++
++    async def _refresh_hits(self, s, guild_id: int, public_channels: set[int], names) -> None:
++        """Every few hours: find messages that got a laugh (someone laughed within the next 3 messages)."""
++        if time.monotonic() - self._loaded.get(guild_id, -1e9) < REFRESH_SECONDS:
++            return
++        result = await s.stream(
++            select(Message.channel_id, Message.author_id, Message.content)
++            .where(Message.guild_id == guild_id, Message.channel_id.in_(public_channels))
++            .order_by(Message.channel_id, Message.id))
++        window, hits = [], []
++        async for channel_id, author_id, content in result:
++            window.append((channel_id, author_id, content or ""))
++            if len(window) > 4:
++                window.pop(0)
++            if len(window) == 4:
++                ch, au, text = window[0]
++                after = window[1:]
++                if (_usable(text) and not _LAUGH.search(text)
++                        and all(c == ch for c, _, _ in after)
++                        and any(_LAUGH.search(t) and a != au for _, a, t in after)):
++                    hits.append((au, text))
++        picked = random.sample(hits, min(400, len(hits)))
++        self._hits[guild_id] = [f"{names(au)}: {text}" for au, text in picked]
++        self._loaded[guild_id] = time.monotonic()
+diff --git a/bot/services/responder.py b/bot/services/responder.py
+index 6f3024c..81c964f 100644
+--- a/bot/services/responder.py
++++ b/bot/services/responder.py
+@@ -15,6 +15,7 @@ from bot.database.engine import Database
+ from bot.memory import store
+ from bot.memory.embeddings import Embedder
+ from bot.memory.recall import recall_messages
++from bot.memory.voice import VoiceSampler
+ from bot.memory.retrieval import relevant_memories
+ from bot.services.privacy import PrivacyState
+ 
+@@ -37,6 +38,7 @@ class Responder:
+         self.embedder = embedder
+         self.privacy = privacy
+         self._last_offline_notice: dict[int, float] = {}
++        self.voice = VoiceSampler()
+ 
+     async def personality_for(self, guild_id: int) -> Personality:
+         cfg = await self.bot.guild_config.get(guild_id)
+@@ -122,6 +124,8 @@ class Responder:
+                           and not self.privacy.channel_excluded(c)}
+                 recalled = await recall_messages(s, message.guild.id, conversation, public,
+                                                  message.channel.id, RECALL_MESSAGES)
++                voice = await self.voice.samples(s, message.guild.id, participants, public,
++                                                 lambda uid: self._name(message.guild, uid))
+         except Exception:
+             log.exception("Memory lookup failed; replying without memory")
+             return {}
+@@ -132,9 +136,11 @@ class Responder:
+         lore = [f"{m.title}: {m.text}" if m.title else m.text for m in found["lore"]]
+         background = [f"{m.title}: {m.text}" if m.title else m.text for m in found["background"]]
+         recall = [f"{self._name(message.guild, m.author_id)} ({m.created_at:%b %Y}): {m.content}" for m in recalled]
+-        log.info("[MEMORY] context: %d people memories, %d lore, %d background lore, %d recalled messages",
+-                 len(people), len(lore), len(background), len(recall))
+-        return {"people": people, "lore": lore, "background": background, "recall": recall}
++        log.info("[MEMORY] context: %d people memories, %d lore, %d background lore, %d recalled messages, "
++                 "%d voice samples", len(people), len(lore), len(background), len(recall),
++                 len(voice["people"]) + len(voice["hits"]))
++        return {"people": people, "lore": lore, "background": background, "recall": recall,
++                "voice_people": voice["people"], "voice_hits": voice["hits"]}
+ 
+     @staticmethod
+     def _name(guild: discord.Guild, user_id: int) -> str:
