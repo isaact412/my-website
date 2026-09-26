@@ -1,0 +1,205 @@
+diff --git a/bot/ai/prompts.py b/bot/ai/prompts.py
+index 85f233e..c3c7c56 100644
+--- a/bot/ai/prompts.py
++++ b/bot/ai/prompts.py
+@@ -68,12 +68,19 @@ def build_messages(
+     if replying_to:
+         reply_note = f'\n(they are replying to {sanitize(replying_to[0])}: "{sanitize(replying_to[1])}")'
+     memory_block = ""
+-    if memory_lines and (memory_lines.get("people") or memory_lines.get("lore")):
++    if memory_lines and any(memory_lines.get(k) for k in ("people", "lore", "background", "recall")):
+         parts = []
+         if memory_lines.get("people"):
+             parts.append("people here:\n" + "\n".join(f"- {sanitize(x)}" for x in memory_lines["people"]))
+         if memory_lines.get("lore"):
+             parts.append("possibly relevant server lore:\n" + "\n".join(f"- {sanitize(x)}" for x in memory_lines["lore"]))
++        if memory_lines.get("background"):
++            parts.append("server lore you just know (background, don't force it):\n"
++                         + "\n".join(f"- {sanitize(x)}" for x in memory_lines["background"]))
++        if memory_lines.get("recall"):
++            parts.append("real old messages from this server related to what's being said now "
++                         "(great for callbacks if they genuinely fit):\n"
++                         + "\n".join(f"- {sanitize(x)}" for x in memory_lines["recall"]))
+         memory_block = (
+             "<memory>\nthings you remember from past chats (may be outdated). use them naturally like a friend would. "
+             "never list them, and don't force a callback unless it genuinely fits.\n" + "\n\n".join(parts) + "\n</memory>\n\n"
+diff --git a/bot/memory/recall.py b/bot/memory/recall.py
+new file mode 100644
+index 0000000..07afd6e
+--- /dev/null
++++ b/bot/memory/recall.py
+@@ -0,0 +1,64 @@
++"""Message recall: finds real old messages related to the current conversation. 100% local.
++
++Uses the SQLite full-text index over every stored message (including the whole scanned history),
++so the bot can bring back what people actually said months ago without any AI call.
++Only messages from channels everyone in the server can read are recalled, so nothing from a
++private channel ever leaks into a public one.
++"""
++import re
++from datetime import datetime, timedelta, timezone
++
++from sqlalchemy import select, text
++
++from bot.database.models import Message
++
++STOPWORDS = set("""
++a about after again all also am an and any are as at be because been before being but by can could did do does
++doing dont down during each few for from further had has have having he her here hers him his how i if im in into
++is it its just like me more most my no nor not now of off on once only or other our out over own same she should so
++some such than that thats the their them then there these they this those through to too under until up very was
++we were what when where which while who whom why will with would you your yours yeah yea lol lmao bro ok okay oh
++gonna wanna got get really thing things know think want need make going said say one two
++""".split())
++
++
++def keywords(conversation: str, limit: int = 8) -> list[str]:
++    """The most distinctive words in the conversation (longer and rarer-looking words first)."""
++    words = [w for w in re.findall(r"[a-z0-9']{3,}", conversation.lower()) if w not in STOPWORDS]
++    seen, out = set(), []
++    for w in sorted(words, key=len, reverse=True):
++        w = w.strip("'")
++        if w and w not in seen:
++            seen.add(w)
++            out.append(w)
++    return out[:limit]
++
++
++async def recall_messages(s, guild_id: int, conversation: str, public_channel_ids: set[int],
++                          current_channel_id: int, limit: int = 8) -> list[Message]:
++    words = keywords(conversation)
++    if not words or not public_channel_ids:
++        return []
++    fts = " OR ".join(f'"{w}"' for w in words)
++    ids = (await s.execute(
++        text("SELECT rowid FROM messages_fts WHERE messages_fts MATCH :q ORDER BY rank LIMIT 300"), {"q": fts}
++    )).scalars().all()
++    if not ids:
++        return []
++    recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
++    rows = list(await s.scalars(select(Message).where(
++        Message.id.in_(ids), Message.guild_id == guild_id, Message.channel_id.in_(public_channel_ids))))
++    order = {mid: i for i, mid in enumerate(ids)}
++    picked, seen_text = [], set()
++    for m in sorted(rows, key=lambda m: order[m.id]):
++        created = m.created_at if m.created_at.tzinfo else m.created_at.replace(tzinfo=timezone.utc)
++        if m.channel_id == current_channel_id and created > recent_cutoff:
++            continue  # already in the live conversation
++        key = m.content.lower().strip()
++        if len(key.split()) < 3 or key in seen_text:
++            continue  # skip one-word noise and duplicates
++        seen_text.add(key)
++        picked.append(m)
++        if len(picked) >= limit:
++            break
++    return sorted(picked, key=lambda m: m.id)  # oldest first reads naturally
+diff --git a/bot/memory/retrieval.py b/bot/memory/retrieval.py
+index 894046b..222f7fc 100644
+--- a/bot/memory/retrieval.py
++++ b/bot/memory/retrieval.py
+@@ -8,19 +8,21 @@ from bot.memory import store
+ from bot.memory.embeddings import Embedder, from_blob
+ from bot.memory.strength import strength
+ 
+-MAX_PEOPLE_MEMORIES = 6
+-MAX_LORE = 2
+-LORE_MIN_RELEVANCE = 0.55       # lore must actually relate to the conversation
+-CALLBACK_COOLDOWN = timedelta(hours=6)
++MAX_PEOPLE_MEMORIES = 12
++MAX_LORE = 4
++LORE_MIN_RELEVANCE = 0.5        # lore must actually relate to the conversation
++STRONG_RELEVANCE = 0.65         # this relevant = always include (no dice roll)
++CALLBACK_COOLDOWN = timedelta(hours=2)
++BACKGROUND_LORE = 3             # a few of the server's greatest hits, so the bot always "knows the server"
+ 
+ 
+ async def relevant_memories(s, embedder: Embedder, guild_id: int, participant_ids: list[int],
+                             conversation: str, callback_chance: float, opted_out) -> dict[str, list]:
+-    """Returns {"people": [...], "lore": [...]} of Memory rows."""
++    """Returns {"people": [...], "lore": [...], "background": [...]} of Memory rows."""
+     memories = [m for m in await store.active_memories(s, guild_id)
+                 if not any(opted_out(uid) for uid in store.subject_ids(m))]
+     if not memories:
+-        return {"people": [], "lore": []}
++        return {"people": [], "lore": [], "background": []}
+ 
+     qv = (await embedder.embed([conversation[-1500:]]) or [None])[0]
+     words = set(conversation.lower().split())
+@@ -48,10 +50,18 @@ async def relevant_memories(s, embedder: Embedder, guild_id: int, participant_id
+         recent = m.last_referenced and (now - _aware(m.last_referenced)) < CALLBACK_COOLDOWN
+         if rel >= LORE_MIN_RELEVANCE and not recent:
+             lore.append((rel + 0.2 * strength(m, now), m))
+-    lore = [m for _, m in sorted(lore, key=lambda x: x[0], reverse=True)[:MAX_LORE]]
+-    if lore and random.random() > callback_chance:
++    ranked = sorted(lore, key=lambda x: x[0], reverse=True)[:MAX_LORE]
++    strong = [m for score, m in ranked if score >= STRONG_RELEVANCE]
++    lore = [m for _, m in ranked]
++    if lore and not strong and random.random() > callback_chance:
+         lore = []
+-    return {"people": people, "lore": lore}
++
++    # Background: a few random picks from the strongest lore, so the bot always has the server's vibe.
++    used = {m.id for m in lore}
++    top = sorted((m for m in memories if m.kind == "lore" and m.id not in used),
++                 key=lambda m: strength(m, now), reverse=True)[:15]
++    background = random.sample(top, min(BACKGROUND_LORE, len(top)))
++    return {"people": people, "lore": lore, "background": background}
+ 
+ 
+ def _aware(dt: datetime) -> datetime:
+diff --git a/bot/services/responder.py b/bot/services/responder.py
+index 9cea9b7..6f3024c 100644
+--- a/bot/services/responder.py
++++ b/bot/services/responder.py
+@@ -14,12 +14,14 @@ from bot.database import repo
+ from bot.database.engine import Database
+ from bot.memory import store
+ from bot.memory.embeddings import Embedder
++from bot.memory.recall import recall_messages
+ from bot.memory.retrieval import relevant_memories
+ from bot.services.privacy import PrivacyState
+ 
+ log = logging.getLogger("bot.ai")
+ 
+-HISTORY_MESSAGES = 12
++HISTORY_MESSAGES = 40      # recent messages the bot reads before replying
++RECALL_MESSAGES = 8        # old messages pulled back from the full history
+ _REACT = re.compile(r"\[react:\s*([^\]]{1,32})\]", re.I)
+ OFFLINE_NOTICE_EVERY = 300  # seconds; don't spam "brain offline" messages
+ 
+@@ -107,7 +109,7 @@ class Responder:
+     async def _memories(self, message: discord.Message, history, participants: list[int]) -> dict[str, list[str]]:
+         """A few relevant memories about the people talking, plus maybe one callback."""
+         try:
+-            conversation = " ".join(text for _, text in history[-6:]) + " " + message.clean_content
++            conversation = " ".join(text for _, text in history[-8:]) + " " + message.clean_content
+             async with self.db.session() as s:
+                 found = await relevant_memories(
+                     s, self.embedder, message.guild.id, participants, conversation,
+@@ -115,6 +117,11 @@ class Responder:
+                     opted_out=lambda uid: self.privacy.user_opted_out(message.guild.id, uid),
+                 )
+                 await store.mark_referenced(s, [m.id for m in found["lore"]])
++                public = {c.id for c in message.guild.text_channels
++                          if c.permissions_for(message.guild.default_role).read_message_history
++                          and not self.privacy.channel_excluded(c)}
++                recalled = await recall_messages(s, message.guild.id, conversation, public,
++                                                 message.channel.id, RECALL_MESSAGES)
+         except Exception:
+             log.exception("Memory lookup failed; replying without memory")
+             return {}
+@@ -123,9 +130,11 @@ class Responder:
+             names = [self._name(message.guild, uid) for uid in store.subject_ids(m)]
+             people.append(f"{' & '.join(names)}: {m.text}")
+         lore = [f"{m.title}: {m.text}" if m.title else m.text for m in found["lore"]]
+-        if people or lore:
+-            log.info("[MEMORY] using %d people memories, %d lore", len(people), len(lore))
+-        return {"people": people, "lore": lore}
++        background = [f"{m.title}: {m.text}" if m.title else m.text for m in found["background"]]
++        recall = [f"{self._name(message.guild, m.author_id)} ({m.created_at:%b %Y}): {m.content}" for m in recalled]
++        log.info("[MEMORY] context: %d people memories, %d lore, %d background lore, %d recalled messages",
++                 len(people), len(lore), len(background), len(recall))
++        return {"people": people, "lore": lore, "background": background, "recall": recall}
+ 
+     @staticmethod
+     def _name(guild: discord.Guild, user_id: int) -> str:
