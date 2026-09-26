@@ -1,0 +1,131 @@
+diff --git a/bot/ai/prompts.py b/bot/ai/prompts.py
+index 12d8eaf..84f95aa 100644
+--- a/bot/ai/prompts.py
++++ b/bot/ai/prompts.py
+@@ -90,6 +90,10 @@ def build_messages(
+             "<memory>\nthings you remember from past chats (may be outdated). use them naturally like a friend would. "
+             "never list them, and don't force a callback unless it genuinely fits.\n" + "\n\n".join(parts) + "\n</memory>\n\n"
+         )
++    names_block = ""
++    if memory_lines and memory_lines.get("whos_who"):
++        names_block = ("who's who (people use real names and discord names interchangeably, they're the same person):\n"
++                       + "\n".join(f"- {sanitize(x)}" for x in memory_lines["whos_who"]) + "\n\n")
+     bible_block = ""
+     if memory_lines and (memory_lines.get("bible_overview") or memory_lines.get("bible_people")):
+         parts = []
+@@ -115,7 +119,7 @@ def build_messages(
+             "you are one of them, not an ai commenting on them.\n" + "\n\n".join(parts) + "\n</how_people_talk>\n\n"
+         )
+     user_block = (
+-        f"{bible_block}{memory_block}{voice_block}channel: #{sanitize(channel_name)}\n"
++        f"{names_block}{bible_block}{memory_block}{voice_block}channel: #{sanitize(channel_name)}\n"
+         f"<chat_log>\n{log_lines}\n</chat_log>\n\n"
+         f"<new_message author=\"{sanitize(author_name)}\">{sanitize(content) or '(no text)'}</new_message>"
+         f"{reply_note}\n\n{task}"
+diff --git a/bot/character/nicknames.py b/bot/character/nicknames.py
+new file mode 100644
+index 0000000..c62dc94
+--- /dev/null
++++ b/bot/character/nicknames.py
+@@ -0,0 +1,43 @@
++"""Who's who: real names and nicknames for server members, from config/nicknames.yaml."""
++import logging
++from pathlib import Path
++
++import yaml
++
++log = logging.getLogger("bot.character")
++
++PATH = Path(__file__).resolve().parents[2] / "config" / "nicknames.yaml"
++
++
++class Nicknames:
++    def __init__(self, path: Path = PATH):
++        self.path = path
++        self._mtime = None
++        self._data: dict[str, list[str]] = {}
++
++    def _load(self) -> dict[str, list[str]]:
++        """Re-reads the file whenever it changes, so edits apply without a restart."""
++        try:
++            mtime = self.path.stat().st_mtime
++        except OSError:
++            return {}
++        if mtime != self._mtime:
++            try:
++                raw = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
++                self._data = {str(k): [str(a) for a in (v or [])] for k, v in raw.items()}
++            except (OSError, yaml.YAMLError) as e:
++                log.warning("Couldn't read %s (%s); keeping the previous version", self.path.name, e)
++            self._mtime = mtime
++        return self._data
++
++    def real_name(self, *names: str | None) -> str | None:
++        """The real name for any of these Discord names, or None."""
++        wanted = {n.lower() for n in names if n}
++        for real, aliases in self._load().items():
++            if real.lower() in wanted or wanted & {a.lower() for a in aliases}:
++                return real
++        return None
++
++    def whos_who(self) -> list[str]:
++        """Lines like 'dale = Massage fucking Watson / watson' for the prompt."""
++        return [f"{real} = {' / '.join(aliases)}" if aliases else real for real, aliases in self._load().items()]
+diff --git a/bot/memory/bible.py b/bot/memory/bible.py
+index 0cdeb25..618bb39 100644
+--- a/bot/memory/bible.py
++++ b/bot/memory/bible.py
+@@ -167,7 +167,9 @@ class ServerBible:
+         notes = ("legendary lore:\n" + "\n".join(f"- {sanitize((m.title + ': ') if m.title else '')}{sanitize(m.text)}" for m in lore)
+                  + "\n\nwho's tight with who:\n" + "\n".join(f"- {sanitize(m.text)}" for m in rel)
+                  + "\n\nphrases this server keeps saying:\n" + "\n".join(f"- {p}" for p in phrases)
+-                 + "\n\nmost active: " + ", ".join(f"{name(u)} ({c:,})" for u, c in list(top_talkers.items())[:12]))
++                 + "\n\nmost active: " + ", ".join(f"{name(u)} ({c:,})" for u, c in list(top_talkers.items())[:12])
++                 + "\n\nwho's who (real name = discord names): " + "; ".join(self.bot.responder.nicknames.whos_who()
++                                                                             if hasattr(self.bot, "responder") else []))
+         overview = await self._ask(router, OVERVIEW_PROMPT, notes, max_tokens=700)
+ 
+         bible = {"built_at": time.time(), "overview": (overview or "")[:2200], "members": sheets, "phrases": phrases}
+diff --git a/bot/services/responder.py b/bot/services/responder.py
+index 9c9fc5c..5b74981 100644
+--- a/bot/services/responder.py
++++ b/bot/services/responder.py
+@@ -17,6 +17,7 @@ from bot.memory.embeddings import Embedder
+ from bot.memory.recall import recall_messages
+ from bot.memory.voice import VoiceSampler
+ from bot.memory.bible import ServerBible
++from bot.character.nicknames import Nicknames
+ from bot.memory.retrieval import relevant_memories
+ from bot.services.privacy import PrivacyState
+ 
+@@ -41,6 +42,7 @@ class Responder:
+         self._last_offline_notice: dict[int, float] = {}
+         self.voice = VoiceSampler()
+         self.bible = ServerBible(bot, db.path.parent)
++        self.nicknames = Nicknames()
+ 
+     async def personality_for(self, guild_id: int) -> Personality:
+         cfg = await self.bot.guild_config.get(guild_id)
+@@ -145,7 +147,8 @@ class Responder:
+         log.info("[BIBLE] %s overview, %d character sheets", "with" if bible["bible_overview"] else "no",
+                  len(bible["bible_people"]))
+         return {"people": people, "lore": lore, "background": background, "recall": recall,
+-                "voice_people": voice["people"], "voice_hits": voice["hits"], **bible}
++                "voice_people": voice["people"], "voice_hits": voice["hits"], **bible,
++                "whos_who": self.nicknames.whos_who()}
+ 
+     @staticmethod
+     def _name(guild: discord.Guild, user_id: int) -> str:
+diff --git a/config/nicknames.yaml b/config/nicknames.yaml
+new file mode 100644
+index 0000000..0352946
+--- /dev/null
++++ b/config/nicknames.yaml
+@@ -0,0 +1,7 @@
++# Who's who. The bot reads this on every reply (no restart needed after editing).
++# Format:   real name: [names they go by on Discord, nicknames, ...]
++# Matching is case-insensitive against usernames, display names and server nicknames.
++isaac: ["xX_JalenMVP_Xx", "isaac_0422", "jalen"]
++dale: ["Massage fucking Watson", "watson"]
++finn: ["Finnygan"]
++eli: ["TaylorSwiftenjoyer"]

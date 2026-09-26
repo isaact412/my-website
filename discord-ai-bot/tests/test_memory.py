@@ -290,3 +290,25 @@ async def test_duplicate_evidence_does_not_crash(env):
     async with db.session() as s:
         m = (await store.active_memories(s, 1))[0]
         assert [src.message_id for src in await store.sources(s, m.id)] == [103]
+
+
+def test_nicknames_file_and_prompt(tmp_path):
+    from bot.character.nicknames import Nicknames
+    from bot.ai.prompts import build_messages
+    from bot.character.personality import load_personality
+    f = tmp_path / "nicknames.yaml"
+    f.write_text('dale: ["Massage fucking Watson", "watson"]\neli: ["TaylorSwiftenjoyer"]\n')
+    n = Nicknames(f)
+    assert n.real_name("massage FUCKING watson") == "dale" and n.real_name("nobody") is None
+    assert n.whos_who()[0] == "dale = Massage fucking Watson / watson"
+    body = build_messages(load_personality(), "bot", "general", [], "eli", "where's dale", None,
+                          {"whos_who": n.whos_who()})[1].content
+    assert "who's who" in body and "dale = Massage fucking Watson / watson" in body
+    f.write_text("broken: [unclosed")  # a typo in the file must not break replies
+    import os, time; os.utime(f, (time.time() + 5, time.time() + 5))
+    assert n.whos_who()[0] == "dale = Massage fucking Watson / watson"
+
+
+def test_default_nicknames_file_loads():
+    from bot.character.nicknames import Nicknames
+    assert Nicknames().real_name("Finnygan") == "finn"

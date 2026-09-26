@@ -90,6 +90,10 @@ def build_messages(
             "<memory>\nthings you remember from past chats (may be outdated). use them naturally like a friend would. "
             "never list them, and don't force a callback unless it genuinely fits.\n" + "\n\n".join(parts) + "\n</memory>\n\n"
         )
+    names_block = ""
+    if memory_lines and memory_lines.get("whos_who"):
+        names_block = ("who's who (people use real names and discord names interchangeably, they're the same person):\n"
+                       + "\n".join(f"- {sanitize(x)}" for x in memory_lines["whos_who"]) + "\n\n")
     bible_block = ""
     if memory_lines and (memory_lines.get("bible_overview") or memory_lines.get("bible_people")):
         parts = []
@@ -115,7 +119,7 @@ def build_messages(
             "you are one of them, not an ai commenting on them.\n" + "\n\n".join(parts) + "\n</how_people_talk>\n\n"
         )
     user_block = (
-        f"{bible_block}{memory_block}{voice_block}channel: #{sanitize(channel_name)}\n"
+        f"{names_block}{bible_block}{memory_block}{voice_block}channel: #{sanitize(channel_name)}\n"
         f"<chat_log>\n{log_lines}\n</chat_log>\n\n"
         f"<new_message author=\"{sanitize(author_name)}\">{sanitize(content) or '(no text)'}</new_message>"
         f"{reply_note}\n\n{task}"

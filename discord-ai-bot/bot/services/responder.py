@@ -17,6 +17,7 @@ from bot.memory.embeddings import Embedder
 from bot.memory.recall import recall_messages
 from bot.memory.voice import VoiceSampler
 from bot.memory.bible import ServerBible
+from bot.character.nicknames import Nicknames
 from bot.memory.retrieval import relevant_memories
 from bot.services.privacy import PrivacyState
 
@@ -41,6 +42,7 @@ class Responder:
         self._last_offline_notice: dict[int, float] = {}
         self.voice = VoiceSampler()
         self.bible = ServerBible(bot, db.path.parent)
+        self.nicknames = Nicknames()
 
     async def personality_for(self, guild_id: int) -> Personality:
         cfg = await self.bot.guild_config.get(guild_id)
@@ -145,7 +147,8 @@ class Responder:
         log.info("[BIBLE] %s overview, %d character sheets", "with" if bible["bible_overview"] else "no",
                  len(bible["bible_people"]))
         return {"people": people, "lore": lore, "background": background, "recall": recall,
-                "voice_people": voice["people"], "voice_hits": voice["hits"], **bible}
+                "voice_people": voice["people"], "voice_hits": voice["hits"], **bible,
+                "whos_who": self.nicknames.whos_who()}
 
     @staticmethod
     def _name(guild: discord.Guild, user_id: int) -> str:

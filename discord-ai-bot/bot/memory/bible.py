@@ -167,7 +167,9 @@ class ServerBible:
         notes = ("legendary lore:\n" + "\n".join(f"- {sanitize((m.title + ': ') if m.title else '')}{sanitize(m.text)}" for m in lore)
                  + "\n\nwho's tight with who:\n" + "\n".join(f"- {sanitize(m.text)}" for m in rel)
                  + "\n\nphrases this server keeps saying:\n" + "\n".join(f"- {p}" for p in phrases)
-                 + "\n\nmost active: " + ", ".join(f"{name(u)} ({c:,})" for u, c in list(top_talkers.items())[:12]))
+                 + "\n\nmost active: " + ", ".join(f"{name(u)} ({c:,})" for u, c in list(top_talkers.items())[:12])
+                 + "\n\nwho's who (real name = discord names): " + "; ".join(self.bot.responder.nicknames.whos_who()
+                                                                             if hasattr(self.bot, "responder") else []))
         overview = await self._ask(router, OVERVIEW_PROMPT, notes, max_tokens=700)
 
         bible = {"built_at": time.time(), "overview": (overview or "")[:2200], "members": sheets, "phrases": phrases}

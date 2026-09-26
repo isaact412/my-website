@@ -1,0 +1,7 @@
+# Who's who. The bot reads this on every reply (no restart needed after editing).
+# Format:   real name: [names they go by on Discord, nicknames, ...]
+# Matching is case-insensitive against usernames, display names and server nicknames.
+isaac: ["xX_JalenMVP_Xx", "isaac_0422", "jalen"]
+dale: ["Massage fucking Watson", "watson"]
+finn: ["Finnygan"]
+eli: ["TaylorSwiftenjoyer"]
