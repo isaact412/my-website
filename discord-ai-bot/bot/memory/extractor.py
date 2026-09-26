@@ -118,12 +118,13 @@ class MemoryExtractor:
                 self._first_pending.setdefault(channel_id, time.monotonic())
                 return 0
             try:
-                return await self._extract(guild_id, ids)
+                return await self.analyze(guild_id, ids) or 0
             except Exception:
                 log.exception("[MEMORY] extraction failed for channel %s", channel_id)
                 return 0
 
-    async def _extract(self, guild_id: int, ids: list[int]) -> int:
+    async def analyze(self, guild_id: int, ids: list[int]) -> int | None:
+        """One AI call over these stored messages. Returns memories saved, or None if no free AI was available."""
         async with self.db.session() as s:
             messages = list(await s.scalars(select(Message).where(Message.id.in_(ids)).order_by(Message.created_at)))
             names = await self._names(s, guild_id, {m.author_id for m in messages})
@@ -140,7 +141,7 @@ class MemoryExtractor:
             result = await self.router.chat(prompt, max_tokens=900, temperature=0.2)
         except AllProvidersUnavailable:
             await self._usage(guild_id, "none", "none", rate_limited=1)
-            return 0
+            return None
         await self._usage(guild_id, result.provider, result.model, calls=1,
                           input_tokens=result.input_tokens, output_tokens=result.output_tokens)
 
@@ -190,11 +191,17 @@ class MemoryExtractor:
         return 1
 
     async def _names(self, s, guild_id: int, user_ids: set[int]) -> dict[int, str]:
+        """Current display names; for people who left, the last name we saw them use."""
         guild = self.bot.get_guild(guild_id)
         names = {}
         for uid in user_ids:
             member = guild.get_member(uid) if guild else None
-            names[uid] = member.display_name if member else f"user{str(uid)[-4:]}"
+            if member:
+                names[uid] = member.display_name
+                continue
+            old = await s.scalar(select(UserName.value).where(UserName.user_id == uid)
+                                 .order_by(UserName.kind.desc(), UserName.last_seen.desc()).limit(1))
+            names[uid] = old or f"user{str(uid)[-4:]}"
         return names
 
     async def _all_name_lookup(self, guild_id: int) -> dict[str, int]:

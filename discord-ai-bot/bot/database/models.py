@@ -174,3 +174,36 @@ class MemorySource(Base):
     channel_id: Mapped[int] = mapped_column(BigInteger)
     author_id: Mapped[int] = mapped_column(BigInteger, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScanJob(Base):
+    """A /scanserver run. Survives restarts: a running job resumes when the bot starts."""
+
+    __tablename__ = "scan_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("guilds.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(20))  # running | paused | done | stopped
+    phase: Mapped[str] = mapped_column(String(20), default="fetch")  # fetch → digest → done
+    started_by: Mapped[int] = mapped_column(BigInteger)
+    progress_channel_id: Mapped[int | None] = mapped_column(BigInteger)
+    progress_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ScanChannel(Base):
+    """Per-channel progress for a scan. The cursors make scanning resumable."""
+
+    __tablename__ = "scan_channels"
+
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("scan_jobs.id", ondelete="CASCADE"), primary_key=True)
+    channel_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), default="")
+    estimate: Mapped[int] = mapped_column(Integer, default=0)
+    fetched: Mapped[int] = mapped_column(Integer, default=0)
+    fetch_cursor: Mapped[int] = mapped_column(BigInteger, default=0)   # last message ID read from Discord
+    fetch_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    digest_cursor: Mapped[int] = mapped_column(BigInteger, default=0)  # last message ID analyzed for memories
+    digested: Mapped[int] = mapped_column(Integer, default=0)
+    digest_done: Mapped[bool] = mapped_column(Boolean, default=False)

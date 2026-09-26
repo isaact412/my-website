@@ -17,6 +17,7 @@ from bot.indexing.ingest import Ingestor
 from bot.logging_setup import setup_logging
 from bot.memory.embeddings import Embedder
 from bot.memory.extractor import MemoryExtractor
+from bot.memory.scanner import Scanner
 from bot.services.privacy import PrivacyState
 from bot.services.responder import Responder
 
@@ -30,6 +31,7 @@ EXTENSIONS = [
     "bot.commands.privacy",
     "bot.features.search",
     "bot.commands.memory_cmds",
+    "bot.commands.scan_cmds",
     "bot.listeners.messages",
 ]
 
@@ -60,6 +62,7 @@ class DiscordAIBot(commands.Bot):
         self.background_budget = Budget(5, settings.background_daily_call_limit, 0)
         self.extractor = MemoryExtractor(self, db, self.router, self.embedder, self.privacy, self.background_budget)
         self.ingestor.on_stored = self.extractor.note
+        self.scanner = Scanner(self, db, Budget(4, settings.history_daily_call_limit, 0))
         self.responder = Responder(self, self.router, self.budget, db, self.personality, self.embedder, self.privacy)
 
     async def setup_hook(self) -> None:
@@ -88,6 +91,7 @@ class DiscordAIBot(commands.Bot):
         for guild in self.guilds:
             await self._remember_guild(guild)
             log.info("In server: %s (id %s)", guild.name, guild.id)
+        await self.scanner.resume_after_restart()
 
     async def on_message(self, message: discord.Message) -> None:
         # We only use slash commands. Skipping discord.py's "!command" parsing also stops

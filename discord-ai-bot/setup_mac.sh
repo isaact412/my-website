@@ -29,6 +29,8 @@ AI_DAILY_CALL_LIMIT=800
 AI_USER_COOLDOWN_SECONDS=8
 # Memory analysis runs in the background with its own, smaller limit
 BACKGROUND_DAILY_CALL_LIMIT=150
+# /scanserver turns old history into lore slowly, within this many AI calls per day
+HISTORY_DAILY_CALL_LIMIT=250
 EOF_FILE
 cat > .gitignore <<'EOF_FILE'
 .env
@@ -1094,6 +1096,147 @@ class Privacy(commands.Cog):
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Privacy(bot))
 EOF_FILE
+mkdir -p bot/commands
+cat > bot/commands/scan_cmds.py <<'EOF_FILE'
+"""Admin commands for scanning server history: /scanserver, /scanstatus, /pausescan, /resumescan, /stopscan."""
+import logging
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from bot.commands.admin import is_admin
+from bot.memory.scanner import DIGEST_CHUNK, PAGE, PAUSE_BETWEEN_PAGES, estimate_channel
+
+log = logging.getLogger("bot.scan")
+
+
+class ScanSetup(discord.ui.View):
+    """Channel picker + start/cancel buttons. Only the admin who ran /scanserver can use it."""
+
+    def __init__(self, cog: "ScanCommands", user_id: int, channels: list[tuple[discord.TextChannel, int]]):
+        super().__init__(timeout=300)
+        self.cog, self.user_id = cog, user_id
+        self.estimates = {c.id: (c, est) for c, est in channels}
+        self.selected = set(self.estimates)
+        self.picker.options = [
+            discord.SelectOption(label=f"#{c.name}"[:100], value=str(c.id), description=f"~{est:,} messages", default=True)
+            for c, est in channels[:25]
+        ]
+        self.picker.max_values = len(self.picker.options)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    @discord.ui.select(placeholder="channels to scan", min_values=1)
+    async def picker(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
+        self.selected = {int(v) for v in select.values}
+        for opt in select.options:
+            opt.default = opt.value in select.values
+        await interaction.response.edit_message(content=self.cog.plan_text(self), view=self)
+
+    @discord.ui.button(label="start scan", style=discord.ButtonStyle.success)
+    async def start(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.stop()
+        await interaction.response.edit_message(content="starting. progress will be posted in this channel.", view=None)
+        progress = await interaction.channel.send("📚 starting server history scan...")
+        chosen = [self.estimates[cid] for cid in self.selected]
+        await self.cog.bot.scanner.create_job(interaction.guild, chosen, interaction.user.id, progress)
+
+    @discord.ui.button(label="cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.stop()
+        await interaction.response.edit_message(content="cancelled. nothing was scanned.", view=None)
+
+
+class ScanCommands(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    def plan_text(self, view: ScanSetup) -> str:
+        chosen = [view.estimates[cid] for cid in view.selected]
+        total = sum(est for _, est in chosen)
+        minutes = max(1, round(total / PAGE * (PAUSE_BETWEEN_PAGES + 0.4) / 60))
+        ai_calls = round(total / DIGEST_CHUNK * 0.6)  # boring chunks are skipped for free
+        per_day = self.bot.settings.history_daily_call_limit
+        days = max(1, -(-ai_calls // per_day)) if ai_calls else 0
+        lines = [
+            "**here's what `/scanserver` will do:**",
+            f"1. read **~{total:,} messages** from {len(chosen)} channel(s) and save them on the bot's computer "
+            f"(free, about **{minutes} min**). bots, excluded channels and opted-out people are skipped.",
+            f"2. slowly turn that history into memories and lore using the free AI "
+            f"(~{ai_calls:,} calls, up to {per_day}/day, so about **{days} day(s)**). costs $0.",
+            "it can be paused, resumed or stopped anytime, and picks up where it left off after a restart.",
+            "",
+            "**channels** (estimates are rough):",
+            *[f"• #{c.name}: ~{est:,}" for c, est in chosen[:25]],
+        ]
+        if len(view.estimates) > 25:
+            lines.append(f"(only the first 25 channels can be picked here; {len(view.estimates) - 25} more can be scanned later)")
+        return "\n".join(lines)
+
+    @app_commands.command(name="scanserver", description="(admins) read this server's message history so the bot knows the lore")
+    @app_commands.guild_only()
+    @is_admin()
+    async def scanserver(self, interaction: discord.Interaction) -> None:
+        if await self.bot.scanner.current_job(interaction.guild_id):
+            await interaction.response.send_message("a scan is already going. `/scanstatus` to check on it.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        me = interaction.guild.me
+        readable = [c for c in interaction.guild.text_channels
+                    if c.permissions_for(me).view_channel and c.permissions_for(me).read_message_history
+                    and not self.bot.privacy.channel_excluded(c)]
+        if not readable:
+            await interaction.followup.send("i can't read any channels here. check my permissions.", ephemeral=True)
+            return
+        channels = [(c, await estimate_channel(c)) for c in readable[:25]]
+        channels.sort(key=lambda x: x[1], reverse=True)
+        view = ScanSetup(self, interaction.user.id, channels)
+        await interaction.followup.send(self.plan_text(view), view=view, ephemeral=True)
+
+    @app_commands.command(name="scanstatus", description="(admins) progress of the history scan")
+    @app_commands.guild_only()
+    @is_admin()
+    async def scanstatus(self, interaction: discord.Interaction) -> None:
+        job = await self.bot.scanner.current_job(interaction.guild_id)
+        text = await self.bot.scanner.status_text(job.id) if job else "no scan running. `/scanserver` to start one."
+        await interaction.response.send_message(text, ephemeral=True)
+
+    @app_commands.command(name="pausescan", description="(admins) pause the history scan")
+    @app_commands.guild_only()
+    @is_admin()
+    async def pausescan(self, interaction: discord.Interaction) -> None:
+        job = await self.bot.scanner.set_status(interaction.guild_id, "paused")
+        await interaction.response.send_message("paused. `/resumescan` to continue." if job else "no scan running.", ephemeral=True)
+
+    @app_commands.command(name="resumescan", description="(admins) continue a paused history scan")
+    @app_commands.guild_only()
+    @is_admin()
+    async def resumescan(self, interaction: discord.Interaction) -> None:
+        job = await self.bot.scanner.set_status(interaction.guild_id, "running")
+        await interaction.response.send_message("resumed." if job else "nothing to resume.", ephemeral=True)
+
+    @app_commands.command(name="stopscan", description="(admins) stop the history scan (what's saved so far is kept)")
+    @app_commands.guild_only()
+    @is_admin()
+    async def stopscan(self, interaction: discord.Interaction) -> None:
+        job = await self.bot.scanner.set_status(interaction.guild_id, "stopped")
+        await interaction.response.send_message("stopped. everything read so far is kept." if job else "no scan running.", ephemeral=True)
+
+    async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        msg = "admins only (you need Manage Server)" if isinstance(error, app_commands.CheckFailure) else "that broke. check the logs."
+        if not isinstance(error, app_commands.CheckFailure):
+            log.exception("Scan command failed", exc_info=error)
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(ScanCommands(bot))
+EOF_FILE
 mkdir -p bot
 cat > bot/config.py <<'EOF_FILE'
 """Loads settings from the .env file and checks they look sane."""
@@ -1129,6 +1272,7 @@ class Settings:
     ai_daily_call_limit: int
     ai_user_cooldown_seconds: int
     background_daily_call_limit: int
+    history_daily_call_limit: int
 
 
 def _get(name: str, default: str = "") -> str:
@@ -1219,6 +1363,7 @@ def load_settings() -> Settings:
         ai_daily_call_limit=_int("AI_DAILY_CALL_LIMIT", 800),
         ai_user_cooldown_seconds=_int("AI_USER_COOLDOWN_SECONDS", 8),
         background_daily_call_limit=_int("BACKGROUND_DAILY_CALL_LIMIT", 150),
+        history_daily_call_limit=_int("HISTORY_DAILY_CALL_LIMIT", 250),
     )
 
 
@@ -1507,6 +1652,39 @@ class MemorySource(Base):
     channel_id: Mapped[int] = mapped_column(BigInteger)
     author_id: Mapped[int] = mapped_column(BigInteger, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScanJob(Base):
+    """A /scanserver run. Survives restarts: a running job resumes when the bot starts."""
+
+    __tablename__ = "scan_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("guilds.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(20))  # running | paused | done | stopped
+    phase: Mapped[str] = mapped_column(String(20), default="fetch")  # fetch → digest → done
+    started_by: Mapped[int] = mapped_column(BigInteger)
+    progress_channel_id: Mapped[int | None] = mapped_column(BigInteger)
+    progress_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ScanChannel(Base):
+    """Per-channel progress for a scan. The cursors make scanning resumable."""
+
+    __tablename__ = "scan_channels"
+
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("scan_jobs.id", ondelete="CASCADE"), primary_key=True)
+    channel_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), default="")
+    estimate: Mapped[int] = mapped_column(Integer, default=0)
+    fetched: Mapped[int] = mapped_column(Integer, default=0)
+    fetch_cursor: Mapped[int] = mapped_column(BigInteger, default=0)   # last message ID read from Discord
+    fetch_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    digest_cursor: Mapped[int] = mapped_column(BigInteger, default=0)  # last message ID analyzed for memories
+    digested: Mapped[int] = mapped_column(Integer, default=0)
+    digest_done: Mapped[bool] = mapped_column(Boolean, default=False)
 EOF_FILE
 mkdir -p bot/database
 cat > bot/database/repo.py <<'EOF_FILE'
@@ -1939,6 +2117,8 @@ def setup_logging(level: str, secrets: list[str]) -> None:
     # discord.py is very chatty at INFO; keep its noise down
     logging.getLogger("discord").setLevel(logging.WARNING)
     logging.getLogger("alembic").setLevel(logging.WARNING)  # bot.db logs the migration summary instead
+    for noisy in ("httpx", "huggingface_hub", "fastembed"):  # model download chatter
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 EOF_FILE
 mkdir -p bot
 cat > bot/main.py <<'EOF_FILE'
@@ -1961,6 +2141,7 @@ from bot.indexing.ingest import Ingestor
 from bot.logging_setup import setup_logging
 from bot.memory.embeddings import Embedder
 from bot.memory.extractor import MemoryExtractor
+from bot.memory.scanner import Scanner
 from bot.services.privacy import PrivacyState
 from bot.services.responder import Responder
 
@@ -1974,6 +2155,7 @@ EXTENSIONS = [
     "bot.commands.privacy",
     "bot.features.search",
     "bot.commands.memory_cmds",
+    "bot.commands.scan_cmds",
     "bot.listeners.messages",
 ]
 
@@ -2004,6 +2186,7 @@ class DiscordAIBot(commands.Bot):
         self.background_budget = Budget(5, settings.background_daily_call_limit, 0)
         self.extractor = MemoryExtractor(self, db, self.router, self.embedder, self.privacy, self.background_budget)
         self.ingestor.on_stored = self.extractor.note
+        self.scanner = Scanner(self, db, Budget(4, settings.history_daily_call_limit, 0))
         self.responder = Responder(self, self.router, self.budget, db, self.personality, self.embedder, self.privacy)
 
     async def setup_hook(self) -> None:
@@ -2032,6 +2215,7 @@ class DiscordAIBot(commands.Bot):
         for guild in self.guilds:
             await self._remember_guild(guild)
             log.info("In server: %s (id %s)", guild.name, guild.id)
+        await self.scanner.resume_after_restart()
 
     async def on_message(self, message: discord.Message) -> None:
         # We only use slash commands. Skipping discord.py's "!command" parsing also stops
@@ -2263,12 +2447,13 @@ class MemoryExtractor:
                 self._first_pending.setdefault(channel_id, time.monotonic())
                 return 0
             try:
-                return await self._extract(guild_id, ids)
+                return await self.analyze(guild_id, ids) or 0
             except Exception:
                 log.exception("[MEMORY] extraction failed for channel %s", channel_id)
                 return 0
 
-    async def _extract(self, guild_id: int, ids: list[int]) -> int:
+    async def analyze(self, guild_id: int, ids: list[int]) -> int | None:
+        """One AI call over these stored messages. Returns memories saved, or None if no free AI was available."""
         async with self.db.session() as s:
             messages = list(await s.scalars(select(Message).where(Message.id.in_(ids)).order_by(Message.created_at)))
             names = await self._names(s, guild_id, {m.author_id for m in messages})
@@ -2285,7 +2470,7 @@ class MemoryExtractor:
             result = await self.router.chat(prompt, max_tokens=900, temperature=0.2)
         except AllProvidersUnavailable:
             await self._usage(guild_id, "none", "none", rate_limited=1)
-            return 0
+            return None
         await self._usage(guild_id, result.provider, result.model, calls=1,
                           input_tokens=result.input_tokens, output_tokens=result.output_tokens)
 
@@ -2335,11 +2520,17 @@ class MemoryExtractor:
         return 1
 
     async def _names(self, s, guild_id: int, user_ids: set[int]) -> dict[int, str]:
+        """Current display names; for people who left, the last name we saw them use."""
         guild = self.bot.get_guild(guild_id)
         names = {}
         for uid in user_ids:
             member = guild.get_member(uid) if guild else None
-            names[uid] = member.display_name if member else f"user{str(uid)[-4:]}"
+            if member:
+                names[uid] = member.display_name
+                continue
+            old = await s.scalar(select(UserName.value).where(UserName.user_id == uid)
+                                 .order_by(UserName.kind.desc(), UserName.last_seen.desc()).limit(1))
+            names[uid] = old or f"user{str(uid)[-4:]}"
         return names
 
     async def _all_name_lookup(self, guild_id: int) -> dict[str, int]:
@@ -2448,6 +2639,281 @@ async def relevant_memories(s, embedder: Embedder, guild_id: int, participant_id
 
 def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+EOF_FILE
+mkdir -p bot/memory
+cat > bot/memory/scanner.py <<'EOF_FILE'
+"""/scanserver: reads a server's message history, then slowly turns it into memories.
+
+Phase 1, "fetch" (free, no AI): every message in the chosen channels is saved locally,
+100 at a time, oldest first. Discord's rate limits are respected automatically by
+discord.py, and we pause between pages to be polite.
+
+Phase 2, "digest" (free AI, rate-limited): stored history is read in chunks of 60 and
+turned into memories/lore. Boring chunks are skipped without any AI call. This phase
+runs within HISTORY_DAILY_CALL_LIMIT and simply waits for the next day's free quota.
+
+Both phases save a cursor after every step, so a crash or restart resumes where it left off.
+"""
+import asyncio
+import logging
+import time
+from datetime import timezone
+
+import discord
+from sqlalchemy import select
+
+from bot.ai.budget import Budget
+from bot.database import repo
+from bot.database.engine import Database
+from bot.database.models import Message, ScanChannel, ScanJob, utcnow
+
+log = logging.getLogger("bot.scan")
+
+PAGE = 100
+PAUSE_BETWEEN_PAGES = 0.6   # seconds
+DIGEST_CHUNK = 60
+MIN_WORDS_TO_DIGEST = 120   # chunks with less real text than this are skipped for free
+PROGRESS_EVERY = 10         # seconds between progress message edits
+
+
+async def estimate_channel(channel: discord.TextChannel) -> int:
+    """Rough message count: recent message rate × channel age. Discord has no cheap exact count."""
+    try:
+        first = [m async for m in channel.history(limit=1, oldest_first=True)]
+        if not first:
+            return 0
+        recent = [m async for m in channel.history(limit=PAGE)]
+    except (discord.Forbidden, discord.HTTPException):
+        return 0
+    if len(recent) < PAGE:
+        return len(recent)
+    recent_span = max(1.0, (recent[0].created_at - recent[-1].created_at).total_seconds())
+    total_span = (recent[0].created_at - first[0].created_at).total_seconds()
+    return max(PAGE, int(PAGE * total_span / recent_span))
+
+
+class Scanner:
+    def __init__(self, bot, db: Database, budget: Budget):
+        self.bot = bot
+        self.db = db
+        self.budget = budget
+        self._tasks: dict[int, asyncio.Task] = {}   # guild_id -> running task
+        self._phase_note: dict[int, str] = {}
+
+    # ---------- control ----------
+
+    async def create_job(self, guild: discord.Guild, channels: list[tuple[discord.TextChannel, int]],
+                         user_id: int, progress: discord.Message | None) -> int:
+        async with self.db.session() as s:
+            job = ScanJob(guild_id=guild.id, status="running", phase="fetch", started_by=user_id,
+                          progress_channel_id=progress.channel.id if progress else None,
+                          progress_message_id=progress.id if progress else None)
+            s.add(job)
+            await s.flush()
+            for channel, estimate in channels:
+                s.add(ScanChannel(job_id=job.id, channel_id=channel.id, name=channel.name[:100], estimate=estimate,
+                                  fetched=0, fetch_cursor=0, fetch_done=False, digest_cursor=0, digested=0, digest_done=False))
+            job_id = job.id
+        log.info("[SCAN] job %d created for guild %s (%d channels) by %s", job_id, guild.id, len(channels), user_id)
+        self._start(guild.id, job_id)
+        return job_id
+
+    def _start(self, guild_id: int, job_id: int) -> None:
+        self._tasks[guild_id] = asyncio.create_task(self._run(job_id))
+
+    def is_running(self, guild_id: int) -> bool:
+        task = self._tasks.get(guild_id)
+        return bool(task and not task.done())
+
+    async def current_job(self, guild_id: int) -> ScanJob | None:
+        async with self.db.session() as s:
+            return await s.scalar(select(ScanJob).where(
+                ScanJob.guild_id == guild_id, ScanJob.status.in_(["running", "paused"])).order_by(ScanJob.id.desc()))
+
+    async def set_status(self, guild_id: int, status: str) -> ScanJob | None:
+        """pause / stop / resume a guild's active job."""
+        job = await self.current_job(guild_id)
+        if job is None:
+            return None
+        task = self._tasks.pop(guild_id, None)
+        if task:
+            task.cancel()
+        async with self.db.session() as s:
+            row = await s.get(ScanJob, job.id)
+            row.status, row.updated_at = status, utcnow()
+        log.info("[SCAN] job %d → %s", job.id, status)
+        if status == "running":
+            self._start(guild_id, job.id)
+        return job
+
+    async def resume_after_restart(self) -> None:
+        async with self.db.session() as s:
+            jobs = list(await s.scalars(select(ScanJob).where(ScanJob.status == "running")))
+        for job in jobs:
+            if not self.is_running(job.guild_id):
+                log.info("[SCAN] resuming job %d after restart", job.id)
+                self._start(job.guild_id, job.id)
+
+    # ---------- status ----------
+
+    async def status_text(self, job_id: int) -> str:
+        async with self.db.session() as s:
+            job = await s.get(ScanJob, job_id)
+            chans = list(await s.scalars(select(ScanChannel).where(ScanChannel.job_id == job_id)))
+        fetched = sum(c.fetched for c in chans)
+        estimate = sum(max(c.estimate, c.fetched) for c in chans)
+        digested = sum(c.digested for c in chans)
+        lines = [f"📚 **server history scan** (job #{job.id}, {job.status})"]
+        current = next((c for c in chans if not c.fetch_done), None)
+        if current:
+            lines.append(f"reading **#{current.name}**... {current.fetched:,} / ~{max(current.estimate, current.fetched):,}")
+        lines.append(f"channels read: {sum(c.fetch_done for c in chans)}/{len(chans)} · "
+                     f"messages saved: {fetched:,} / ~{estimate:,}")
+        if job.phase in ("digest", "done"):
+            lines.append(f"learning lore: {digested:,} / {fetched:,} messages analyzed")
+        note = self._phase_note.get(job.guild_id)
+        if note and job.status == "running":
+            lines.append(f"_{note}_")
+        if job.status in ("running", "paused"):
+            lines.append("`/scanstatus` · `/pausescan` · `/resumescan` · `/stopscan`")
+        return "\n".join(lines)
+
+    async def _update_progress(self, job: ScanJob, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now - getattr(self, "_last_progress", 0) < PROGRESS_EVERY:
+            return
+        self._last_progress = now
+        if not job.progress_channel_id:
+            return
+        channel = self.bot.get_channel(job.progress_channel_id)
+        if channel is None:
+            return
+        try:
+            msg = channel.get_partial_message(job.progress_message_id)
+            await msg.edit(content=await self.status_text(job.id))
+        except discord.HTTPException:
+            pass  # someone deleted the progress message; the scan carries on
+
+    # ---------- the work ----------
+
+    async def _run(self, job_id: int) -> None:
+        try:
+            async with self.db.session() as s:
+                job = await s.get(ScanJob, job_id)
+            guild = self.bot.get_guild(job.guild_id)
+            if guild is None:
+                log.warning("[SCAN] job %d: bot is no longer in that server; stopping", job_id)
+                return await self._finish(job, "stopped")
+            if job.phase == "fetch":
+                await self._fetch_all(job, guild)
+                async with self.db.session() as s:
+                    (await s.get(ScanJob, job_id)).phase = "digest"
+                job.phase = "digest"
+                await self._update_progress(job, force=True)
+            await self._digest_all(job, guild)
+            await self._finish(job, "done")
+        except asyncio.CancelledError:
+            raise  # paused or stopped; progress is already saved
+        except Exception:
+            log.exception("[SCAN] job %d crashed; it will resume on next restart or /resumescan", job_id)
+
+    async def _finish(self, job: ScanJob, status: str) -> None:
+        async with self.db.session() as s:
+            row = await s.get(ScanJob, job.id)
+            row.status, row.phase, row.updated_at = status, "done" if status == "done" else row.phase, utcnow()
+        job.status = status
+        self._phase_note.pop(job.guild_id, None)
+        log.info("[SCAN] job %d %s", job.id, status)
+        await self._update_progress(job, force=True)
+
+    async def _fetch_all(self, job: ScanJob, guild: discord.Guild) -> None:
+        async with self.db.session() as s:
+            chans = list(await s.scalars(select(ScanChannel).where(ScanChannel.job_id == job.id, ScanChannel.fetch_done.is_(False))))
+        for sc in chans:
+            channel = guild.get_channel(sc.channel_id)
+            if channel is None or self.bot.privacy.channel_excluded(channel):
+                await self._mark(job.id, sc.channel_id, fetch_done=True)
+                continue
+            await self._fetch_channel(job, channel, sc)
+
+    async def _fetch_channel(self, job: ScanJob, channel: discord.TextChannel, sc: ScanChannel) -> None:
+        cursor, fetched = sc.fetch_cursor, sc.fetched
+        log.info("[SCAN] reading #%s from %s", channel.name, "the start" if not cursor else f"message {cursor}")
+        batch: list[discord.Message] = []
+        try:
+            after = discord.Object(id=cursor) if cursor else None
+            async for m in channel.history(limit=None, after=after, oldest_first=True):
+                batch.append(m)
+                if len(batch) >= PAGE:
+                    cursor, fetched = await self._save_page(job, sc.channel_id, batch, fetched)
+                    batch = []
+                    await self._update_progress(job)
+                    await asyncio.sleep(PAUSE_BETWEEN_PAGES)
+            if batch:
+                cursor, fetched = await self._save_page(job, sc.channel_id, batch, fetched)
+        except discord.Forbidden:
+            log.warning("[SCAN] no permission to read #%s history; skipping it", channel.name)
+        await self._mark(job.id, sc.channel_id, fetch_done=True)
+        log.info("[SCAN] finished reading #%s (%d messages seen)", channel.name, fetched)
+
+    async def _save_page(self, job: ScanJob, channel_id: int, batch: list[discord.Message], fetched: int):
+        keep = [m for m in batch if self.bot.ingestor.should_store(m)]
+        async with self.db.session() as s:
+            authors = {}
+            for m in keep:
+                await repo.store_message(s, m)
+                authors[m.author.id] = m.author
+            for author in authors.values():
+                await repo.upsert_user_names(s, author, job.guild_id)
+            row = await s.get(ScanChannel, (job.id, channel_id))
+            row.fetch_cursor, row.fetched = batch[-1].id, fetched + len(keep)
+        return batch[-1].id, fetched + len(keep)
+
+    async def _digest_all(self, job: ScanJob, guild: discord.Guild) -> None:
+        # Only digest history from before the scan started; newer chat is handled live.
+        cutoff = discord.utils.time_snowflake(job.created_at.replace(tzinfo=job.created_at.tzinfo or timezone.utc))
+        async with self.db.session() as s:
+            chans = list(await s.scalars(select(ScanChannel).where(ScanChannel.job_id == job.id, ScanChannel.digest_done.is_(False))))
+        for sc in chans:
+            cursor, digested = sc.digest_cursor, sc.digested
+            while True:
+                async with self.db.session() as s:
+                    rows = list(await s.execute(
+                        select(Message.id, Message.content).where(
+                            Message.channel_id == sc.channel_id, Message.id > cursor, Message.id < cutoff)
+                        .order_by(Message.id).limit(DIGEST_CHUNK)))
+                if not rows:
+                    break
+                ids = [r[0] for r in rows]
+                words = sum(len(r[1].split()) for r in rows)
+                if words >= MIN_WORDS_TO_DIGEST:
+                    await self._wait_for_budget(job)
+                    self.budget.record(None)
+                    saved = await self.bot.extractor.analyze(job.guild_id, ids)
+                    if saved is None:  # free AI unavailable right now: wait, then retry this same chunk
+                        self._phase_note[job.guild_id] = "free AI busy, retrying in 5 minutes"
+                        await self._update_progress(job, force=True)
+                        await asyncio.sleep(300)
+                        continue
+                self._phase_note.pop(job.guild_id, None)
+                cursor, digested = ids[-1], digested + len(ids)
+                await self._mark(job.id, sc.channel_id, digest_cursor=cursor, digested=digested)
+                await self._update_progress(job)
+            await self._mark(job.id, sc.channel_id, digest_done=True)
+
+    async def _wait_for_budget(self, job: ScanJob) -> None:
+        while (reason := self.budget.blocked_reason(None)):
+            self._phase_note[job.guild_id] = (
+                "used today's free AI allowance for history; continuing tomorrow" if "daily" in reason
+                else "pacing AI calls")
+            await self._update_progress(job, force=True)
+            await asyncio.sleep(600 if "daily" in reason else 20)
+
+    async def _mark(self, job_id: int, channel_id: int, **fields) -> None:
+        async with self.db.session() as s:
+            row = await s.get(ScanChannel, (job_id, channel_id))
+            for k, v in fields.items():
+                setattr(row, k, v)
 EOF_FILE
 mkdir -p bot/memory
 cat > bot/memory/sensitive.py <<'EOF_FILE'
@@ -3194,6 +3660,59 @@ def downgrade() -> None:
     op.drop_index("ix_memories_guild_kind", "memories")
     op.drop_table("memories")
 EOF_FILE
+mkdir -p migrations/versions
+cat > migrations/versions/0004_scan_jobs.py <<'EOF_FILE'
+"""scan_jobs + scan_channels (resumable /scanserver)
+
+Revision ID: 0004
+Revises: 0003
+Create Date: 2026-09-26
+"""
+from alembic import op
+import sqlalchemy as sa
+
+revision = "0004"
+down_revision = "0003"
+branch_labels = None
+depends_on = None
+
+TS = sa.DateTime(timezone=True)
+
+
+def upgrade() -> None:
+    op.create_table(
+        "scan_jobs",
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column("guild_id", sa.BigInteger(), sa.ForeignKey("guilds.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("status", sa.String(20), nullable=False),
+        sa.Column("phase", sa.String(20), nullable=False),
+        sa.Column("started_by", sa.BigInteger(), nullable=False),
+        sa.Column("progress_channel_id", sa.BigInteger(), nullable=True),
+        sa.Column("progress_message_id", sa.BigInteger(), nullable=True),
+        sa.Column("created_at", TS, nullable=False),
+        sa.Column("updated_at", TS, nullable=False),
+    )
+    op.create_index("ix_scan_jobs_guild_id", "scan_jobs", ["guild_id"])
+    op.create_table(
+        "scan_channels",
+        sa.Column("job_id", sa.Integer(), sa.ForeignKey("scan_jobs.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column("channel_id", sa.BigInteger(), primary_key=True),
+        sa.Column("name", sa.String(100), nullable=False),
+        sa.Column("estimate", sa.Integer(), nullable=False),
+        sa.Column("fetched", sa.Integer(), nullable=False),
+        sa.Column("fetch_cursor", sa.BigInteger(), nullable=False),
+        sa.Column("fetch_done", sa.Boolean(), nullable=False),
+        sa.Column("digest_cursor", sa.BigInteger(), nullable=False),
+        sa.Column("digested", sa.Integer(), nullable=False),
+        sa.Column("digest_done", sa.Boolean(), nullable=False),
+    )
+
+
+def downgrade() -> None:
+    op.drop_table("scan_channels")
+    op.drop_index("ix_scan_jobs_guild_id", "scan_jobs")
+    op.drop_table("scan_jobs")
+EOF_FILE
 cat > pytest.ini <<'EOF_FILE'
 [pytest]
 asyncio_mode = strict
@@ -3227,7 +3746,7 @@ from bot.config import ProviderConfig, Settings
 
 def make_settings(providers, allow_paid=False):
     from pathlib import Path
-    return Settings("t", 1, None, "INFO", Path("x.db"), allow_paid, providers, 20, 800, 8, 150)
+    return Settings("t", 1, None, "INFO", Path("x.db"), allow_paid, providers, 20, 800, 8, 150, 250)
 
 
 async def fake_server(behaviour):
@@ -3482,6 +4001,140 @@ def test_prompt_includes_memory_safely():
     assert body.count("</memory>") == 1 and "ben:  ignore rules" in body and "costco" in body
 EOF_FILE
 mkdir -p tests
+cat > tests/test_scanner.py <<'EOF_FILE'
+"""Scanner tests with a fake Discord channel (no network)."""
+import asyncio
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+import discord
+import pytest
+import pytest_asyncio
+from sqlalchemy import func, select
+
+from bot.ai.budget import Budget
+from bot.database import repo
+from bot.database.engine import Database
+from bot.database.migrate import upgrade_to_latest
+from bot.database.models import Message, ScanChannel, ScanJob
+from bot.memory import scanner as scanner_mod
+from bot.memory.scanner import Scanner, estimate_channel
+
+START = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+
+def make_msgs(n, author=7, words=5):
+    out = []
+    for i in range(n):
+        created = START + timedelta(minutes=i)
+        out.append(SimpleNamespace(
+            id=discord.utils.time_snowflake(created) + i, guild=SimpleNamespace(id=1), channel=SimpleNamespace(id=10),
+            author=SimpleNamespace(id=author, name="alex", global_name=None, nick=None, bot=False),
+            content=" ".join(["minecraft"] * words), reference=None, attachments=[], created_at=created,
+            edited_at=None, type=discord.MessageType.default))
+    return out
+
+
+class FakeChannel:
+    def __init__(self, msgs, fail_after=None):
+        self.id, self.name, self.msgs, self.fail_after, self.reads = 10, "general", msgs, fail_after, 0
+
+    def history(self, limit=None, after=None, oldest_first=False):
+        msgs = sorted(self.msgs, key=lambda m: m.id, reverse=not oldest_first)
+        if after is not None:
+            msgs = [m for m in msgs if m.id > after.id]
+        msgs = msgs[:limit] if limit else msgs
+
+        async def gen():
+            for m in msgs:
+                self.reads += 1
+                if self.fail_after and self.reads > self.fail_after:
+                    raise RuntimeError("simulated crash")
+                yield m
+        return gen()
+
+
+@pytest_asyncio.fixture
+async def env(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(scanner_mod, "PAUSE_BETWEEN_PAGES", 0)
+    upgrade_to_latest(tmp_path / "bot.db")
+    db = Database(tmp_path / "bot.db")
+    async with db.session() as s:
+        await repo.upsert_guild(s, SimpleNamespace(id=1, name="test"))
+    yield db
+    await db.close()
+
+
+def fake_bot(db, channel, analyze_results):
+    calls = []
+
+    async def analyze(guild_id, ids):
+        calls.append(ids)
+        return analyze_results.pop(0) if analyze_results else 1
+
+    guild = SimpleNamespace(id=1, get_channel=lambda cid: channel if cid == 10 else None)
+    bot = SimpleNamespace(
+        get_guild=lambda gid: guild, get_channel=lambda cid: None,
+        privacy=SimpleNamespace(channel_excluded=lambda c: False),
+        ingestor=SimpleNamespace(should_store=lambda m: not m.author.bot),
+        extractor=SimpleNamespace(analyze=analyze),
+    )
+    return bot, guild, calls
+
+
+@pytest.mark.asyncio
+async def test_scan_resumes_after_crash_and_digests(env, monkeypatch):
+    db = env
+    msgs = make_msgs(250) + make_msgs(60, words=1)  # last 60 are boring one-word messages
+    for i, m in enumerate(msgs[250:]):
+        m.id = msgs[249].id + 1000 + i
+    channel = FakeChannel(msgs, fail_after=150)
+    bot, guild, calls = fake_bot(db, channel, [])
+    scanner = Scanner(bot, db, Budget(100, 100, 0))
+
+    job_id = await scanner.create_job(guild, [(channel, 300)], 99, None)
+    await scanner._tasks[1]  # crashes after 150 reads; first full page (100) was saved
+    async with db.session() as s:
+        sc = await s.get(ScanChannel, (job_id, 10))
+        assert sc.fetched == 100 and not sc.fetch_done
+        job = await s.get(ScanJob, job_id)
+        job.created_at = datetime.now(timezone.utc)
+
+    channel.fail_after = None
+    await scanner.resume_after_restart()
+    await scanner._tasks[1]
+    async with db.session() as s:
+        assert await s.scalar(select(func.count()).select_from(Message)) == 310
+        sc = await s.get(ScanChannel, (job_id, 10))
+        assert sc.fetch_done and sc.digest_done and sc.digested == 310
+        assert (await s.get(ScanJob, job_id)).status == "done"
+    # 310 messages → 6 chunks; the last two are mostly one-word messages, skipped without an AI call
+    assert len(calls) == 4 and all(len(c) <= 60 for c in calls)
+    assert "done" in await scanner.status_text(job_id)
+
+
+@pytest.mark.asyncio
+async def test_digest_retries_when_ai_unavailable(env, monkeypatch):
+    db = env
+    channel = FakeChannel(make_msgs(60))
+    bot, guild, calls = fake_bot(db, channel, [None, 2])  # first attempt: no free AI available
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(scanner_mod.asyncio, "sleep", lambda s: real_sleep(0))
+    scanner = Scanner(bot, db, Budget(100, 100, 0))
+    job_id = await scanner.create_job(guild, [(channel, 60)], 99, None)
+    async with db.session() as s:
+        (await s.get(ScanJob, job_id)).created_at = datetime.now(timezone.utc)
+    await scanner._tasks[1]
+    assert len(calls) == 2 and calls[0] == calls[1]  # same chunk retried, nothing skipped
+
+
+@pytest.mark.asyncio
+async def test_estimate():
+    assert await estimate_channel(FakeChannel(make_msgs(40))) == 40
+    assert 900 <= await estimate_channel(FakeChannel(make_msgs(1000))) <= 1100
+EOF_FILE
+mkdir -p tests
 cat > tests/test_storage.py <<'EOF_FILE'
 """Tests for message storage, full-text search, and privacy deletion (real SQLite, fake Discord objects)."""
 from datetime import datetime, timezone
@@ -3562,7 +4215,7 @@ async def test_upgrade_existing_0001_database(tmp_path: Path):
     path = tmp_path / "bot.db"
     command.upgrade(_alembic_config(path), "0001")
     assert current_revision(path) == "0001"
-    assert upgrade_to_latest(path) == "0003"
+    assert upgrade_to_latest(path) == "0004"
     assert list((tmp_path / "backups").glob("bot-*.db"))
 
 
@@ -3573,7 +4226,7 @@ def test_slash_commands_are_valid():
     from bot.main import EXTENSIONS, DiscordAIBot
 
     async def load():
-        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], 20, 800, 8, 150)
+        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], 20, 800, 8, 150, 250)
         bot = DiscordAIBot(settings, Database(Path("/tmp/unused-test.db")), "0002")
         for ext in EXTENSIONS:
             await bot.load_extension(ext)
@@ -3581,10 +4234,47 @@ def test_slash_commands_are_valid():
 
     cmds = asyncio.run(load())
     names = sorted(c.name for c in cmds)
-    assert names == sorted(["ping", "debug", "memorynow", "remember", "lore", "forget", "whyremember", "usage", "excludechannel", "includechannel", "clearmemory",
+    assert names == sorted(["ping", "debug", "memorynow", "scanserver", "scanstatus", "pausescan", "resumescan", "stopscan", "remember", "lore", "forget", "whyremember", "usage", "excludechannel", "includechannel", "clearmemory",
                             "privacy", "whatdoyouknow", "optout", "optin", "forgetme", "search"])
     for c in cmds:
         assert len(c.description) <= 100 and c.name.islower()
+EOF_FILE
+mkdir -p tools
+cat > tools/build_setup_script.sh <<'EOF_FILE'
+#!/usr/bin/env bash
+# Regenerates setup_mac.sh: a one-paste installer that writes every project file
+# into ~/discord-ai-bot, keeps .env secrets, installs packages, and starts the bot.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+OUT=setup_mac.sh
+FILES=$(git ls-files --others --cached --exclude-standard | grep -v '^setup_mac.sh$' | sort)
+{
+echo '# Installs/updates the bot files in ~/discord-ai-bot. Never touches your token or API keys.'
+echo 'cd ~/discord-ai-bot || exit 1'
+for f in $FILES; do
+  d=$(dirname "$f"); [ "$d" != "." ] && echo "mkdir -p $d"
+  echo "cat > $f <<'EOF_FILE'"; cat "$f"; echo "EOF_FILE"
+done
+cat <<'EOS'
+touch .env
+add_default() { grep -q "^$1=" .env || echo "$1=$2" >> .env; }
+add_default DISCORD_TOKEN ""
+add_default OWNER_USER_ID 819246808671977482
+add_default DEV_GUILD_ID 1203498616560295946
+add_default LOG_LEVEL INFO
+add_default ALLOW_PAID_MODELS false
+add_default AI_PROVIDER_CHAIN groq
+add_default GROQ_API_KEY ""
+add_default GROQ_MODEL auto
+add_default BACKGROUND_DAILY_CALL_LIMIT 150
+add_default HISTORY_DAILY_CALL_LIMIT 250
+if ! grep -qE '^DISCORD_TOKEN=.+' .env; then echo "⚠️  DISCORD_TOKEN missing in .env"; fi
+if ! grep -qE '^GROQ_API_KEY=.+' .env; then echo "⚠️  GROQ_API_KEY missing in .env"; fi
+echo "✅ files updated, secrets kept"
+source .venv/bin/activate && pip install -q --disable-pip-version-check -r requirements.txt && python -m bot.main
+EOS
+} > "$OUT"
+echo "wrote $OUT"
 EOF_FILE
 touch .env
 add_default() { grep -q "^$1=" .env || echo "$1=$2" >> .env; }
@@ -3597,7 +4287,8 @@ add_default AI_PROVIDER_CHAIN groq
 add_default GROQ_API_KEY ""
 add_default GROQ_MODEL auto
 add_default BACKGROUND_DAILY_CALL_LIMIT 150
+add_default HISTORY_DAILY_CALL_LIMIT 250
 if ! grep -qE '^DISCORD_TOKEN=.+' .env; then echo "⚠️  DISCORD_TOKEN missing in .env"; fi
 if ! grep -qE '^GROQ_API_KEY=.+' .env; then echo "⚠️  GROQ_API_KEY missing in .env"; fi
-echo "✅ files updated, secrets kept (installing packages, first time may take a minute)"
+echo "✅ files updated, secrets kept"
 source .venv/bin/activate && pip install -q --disable-pip-version-check -r requirements.txt && python -m bot.main
