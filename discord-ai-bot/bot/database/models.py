@@ -207,3 +207,19 @@ class ScanChannel(Base):
     digest_cursor: Mapped[int] = mapped_column(BigInteger, default=0)  # last message ID analyzed for memories
     digested: Mapped[int] = mapped_column(Integer, default=0)
     digest_done: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ScanChunk(Base):
+    """One conversation from scanned history, scored so the most lore-worthy ones are learned first."""
+
+    __tablename__ = "scan_chunks"
+    __table_args__ = (Index("ix_scan_chunks_job_todo", "job_id", "done", "score"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("scan_jobs.id", ondelete="CASCADE"))
+    channel_id: Mapped[int] = mapped_column(BigInteger)
+    start_id: Mapped[int] = mapped_column(BigInteger)   # first message ID in the conversation
+    end_id: Mapped[int] = mapped_column(BigInteger)     # last message ID
+    n_messages: Mapped[int] = mapped_column(Integer)
+    score: Mapped[float] = mapped_column(Float)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)

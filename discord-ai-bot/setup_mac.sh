@@ -21,7 +21,12 @@ OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openrouter/free
 
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=
+# "auto" uses whichever model you've downloaded with `ollama pull`
+OLLAMA_MODEL=auto
+
+# Optional: a separate free provider chain for background memory/lore work (e.g. ollama),
+# so it doesn't use up the reply provider's daily quota. Empty = same as AI_PROVIDER_CHAIN.
+WORKER_PROVIDER_CHAIN=
 
 # --- Safety limits (kept below the free tiers' own limits) ---
 AI_MAX_CALLS_PER_MINUTE=20
@@ -398,10 +403,17 @@ class OpenAICompatibleProvider:
         return data.get("data", []) if isinstance(data, dict) else []
 
     async def resolve_model(self) -> str:
-        """Turns GROQ_MODEL=auto into a real model ID that exists right now."""
+        """Turns MODEL=auto into a real model ID that exists right now (for Ollama: one you've downloaded)."""
         if self.cfg.model != "auto":
             return self.model
         available = [m.get("id", "") for m in await self.list_models()]
+        if self.name == "ollama":
+            chat = [m for m in available if m and not _NOT_CHAT.search(m)]
+            if not chat:
+                raise ProviderUnavailable("ollama has no models downloaded yet (run: ollama pull <model>)")
+            self.model = chat[0]
+            log.info("ollama: using downloaded model %s", self.model)
+            return self.model
         for wanted in GROQ_PREFERENCE:
             if wanted in available:
                 self.model = wanted
@@ -494,18 +506,22 @@ class AllProvidersUnavailable(Exception):
 
 
 class AIRouter:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, providers=None, label: str = "replies"):
         self.settings = settings
+        self.label = label
+        self._configs = settings.providers if providers is None else providers
         self.guard = FreeGuard(settings.allow_paid_models)
         self._session: aiohttp.ClientSession | None = None
         self.providers: list[OpenAICompatibleProvider] = []
         self._cooling_until: dict[str, float] = {}
 
     async def start(self) -> None:
-        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=40))
-        self.providers = [OpenAICompatibleProvider(cfg, self._session) for cfg in self.settings.providers]
+        # Local models can take a while on long batches, so background work gets a longer timeout.
+        timeout = 40 if self.label == "replies" else 240
+        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout))
+        self.providers = [OpenAICompatibleProvider(cfg, self._session) for cfg in self._configs]
         mode = "PAID ALLOWED" if self.settings.allow_paid_models else "free only"
-        log.info("AI providers: %s (%s)", ", ".join(p.name for p in self.providers) or "none", mode)
+        log.info("AI providers for %s: %s (%s)", self.label, ", ".join(p.name for p in self.providers) or "none", mode)
         for p in self.providers:
             try:
                 await p.resolve_model()
@@ -1106,7 +1122,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.commands.admin import is_admin
-from bot.memory.scanner import DIGEST_CHUNK, PAGE, PAUSE_BETWEEN_PAGES, estimate_channel
+from bot.memory.scanner import MAX_CHUNK, PAGE, PARALLEL_CHANNELS, estimate_channel
 
 log = logging.getLogger("bot.scan")
 
@@ -1156,16 +1172,20 @@ class ScanCommands(commands.Cog):
     def plan_text(self, view: ScanSetup) -> str:
         chosen = [view.estimates[cid] for cid in view.selected]
         total = sum(est for _, est in chosen)
-        minutes = max(1, round(total / PAGE * (PAUSE_BETWEEN_PAGES + 0.4) / 60))
-        ai_calls = round(total / DIGEST_CHUNK * 0.6)  # boring chunks are skipped for free
+        biggest = max((est for _, est in chosen), default=0)
+        # Channels are read in parallel, so the biggest channel sets the pace (~0.4s per 100 messages).
+        minutes = max(1, round(max(biggest, total / PARALLEL_CHANNELS) / PAGE * 0.4 / 60))
+        ai_calls = round(total / MAX_CHUNK * 0.5)  # boring conversations are skipped for free
         per_day = self.bot.settings.history_daily_call_limit
+        local = bool(self.bot.worker_router)
         days = max(1, -(-ai_calls // per_day)) if ai_calls else 0
         lines = [
             "**here's what `/scanserver` will do:**",
             f"1. read **~{total:,} messages** from {len(chosen)} channel(s) and save them on the bot's computer "
             f"(free, about **{minutes} min**). bots, excluded channels and opted-out people are skipped.",
-            f"2. slowly turn that history into memories and lore using the free AI "
-            f"(~{ai_calls:,} calls, up to {per_day}/day, so about **{days} day(s)**). costs $0.",
+            f"2. turn that history into memories and lore, **best conversations first** (~{ai_calls:,} AI calls). "
+            + ("uses your computer's local AI with no daily limit, plus the cloud's free quota. costs $0."
+               if local else f"free cloud AI only: up to {per_day}/day, so about **{days} day(s)**. costs $0."),
             "it can be paused, resumed or stopped anytime, and picks up where it left off after a restart.",
             "",
             "**channels** (estimates are rough):",
@@ -1268,6 +1288,7 @@ class Settings:
     database_path: Path
     allow_paid_models: bool
     providers: list[ProviderConfig]
+    worker_providers: list[ProviderConfig]  # background memory/lore work; empty = use `providers`
     ai_max_calls_per_minute: int
     ai_daily_call_limit: int
     ai_user_cooldown_seconds: int
@@ -1312,17 +1333,17 @@ def _bool(name: str, default: bool) -> bool:
 _PROVIDER_DEFAULTS = {
     "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "auto"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "openrouter/free"),
-    "ollama": (None, None, "OLLAMA_MODEL", ""),
+    "ollama": (None, None, "OLLAMA_MODEL", "auto"),
 }
 
 
-def _load_providers() -> list[ProviderConfig]:
-    chain = [p.strip().lower() for p in _get("AI_PROVIDER_CHAIN", "groq").split(",") if p.strip()]
+def _load_providers(chain_var: str, default: str) -> list[ProviderConfig]:
+    chain = [p.strip().lower() for p in _get(chain_var, default).split(",") if p.strip()]
     providers = []
     for name in chain:
         if name not in _PROVIDER_DEFAULTS:
             raise ConfigError(
-                f"Unknown provider {name!r} in AI_PROVIDER_CHAIN. Free options: groq, openrouter, ollama. "
+                f"Unknown provider {name!r} in {chain_var}. Free options: groq, openrouter, ollama. "
                 "(Paid providers aren't built in yet, on purpose.)"
             )
         base_url, key_var, model_var, default_model = _PROVIDER_DEFAULTS[name]
@@ -1332,10 +1353,10 @@ def _load_providers() -> list[ProviderConfig]:
         else:
             api_key = _get(key_var)
             if not api_key:
-                raise ConfigError(f"{name} is in AI_PROVIDER_CHAIN but {key_var} is empty in .env.")
+                raise ConfigError(f"{name} is in {chain_var} but {key_var} is empty in .env.")
         model = _get(model_var, default_model) or default_model
         if not model:
-            raise ConfigError(f"{name} is in AI_PROVIDER_CHAIN but {model_var} is empty in .env.")
+            raise ConfigError(f"{name} is in {chain_var} but {model_var} is empty in .env.")
         providers.append(ProviderConfig(name=name, base_url=base_url, api_key=api_key, model=model))
     return providers
 
@@ -1358,7 +1379,8 @@ def load_settings() -> Settings:
         log_level=_get("LOG_LEVEL", "INFO").upper() or "INFO",
         database_path=Path(_get("DATABASE_PATH", "data/bot.db") or "data/bot.db"),
         allow_paid_models=_bool("ALLOW_PAID_MODELS", False),
-        providers=_load_providers(),
+        providers=_load_providers("AI_PROVIDER_CHAIN", "groq"),
+        worker_providers=_load_providers("WORKER_PROVIDER_CHAIN", ""),
         ai_max_calls_per_minute=_int("AI_MAX_CALLS_PER_MINUTE", 20),
         ai_daily_call_limit=_int("AI_DAILY_CALL_LIMIT", 800),
         ai_user_cooldown_seconds=_int("AI_USER_COOLDOWN_SECONDS", 8),
@@ -1369,7 +1391,8 @@ def load_settings() -> Settings:
 
 def secret_values(settings: Settings) -> list[str]:
     """Everything that must never appear in logs."""
-    return [settings.discord_token] + [p.api_key for p in settings.providers if p.name != "ollama"]
+    return [settings.discord_token] + [
+        p.api_key for p in settings.providers + settings.worker_providers if p.name != "ollama"]
 EOF_FILE
 mkdir -p bot/database
 cat > bot/database/__init__.py <<'EOF_FILE'
@@ -1685,6 +1708,22 @@ class ScanChannel(Base):
     digest_cursor: Mapped[int] = mapped_column(BigInteger, default=0)  # last message ID analyzed for memories
     digested: Mapped[int] = mapped_column(Integer, default=0)
     digest_done: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ScanChunk(Base):
+    """One conversation from scanned history, scored so the most lore-worthy ones are learned first."""
+
+    __tablename__ = "scan_chunks"
+    __table_args__ = (Index("ix_scan_chunks_job_todo", "job_id", "done", "score"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("scan_jobs.id", ondelete="CASCADE"))
+    channel_id: Mapped[int] = mapped_column(BigInteger)
+    start_id: Mapped[int] = mapped_column(BigInteger)   # first message ID in the conversation
+    end_id: Mapped[int] = mapped_column(BigInteger)     # last message ID
+    n_messages: Mapped[int] = mapped_column(Integer)
+    score: Mapped[float] = mapped_column(Float)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
 EOF_FILE
 mkdir -p bot/database
 cat > bot/database/repo.py <<'EOF_FILE'
@@ -1767,6 +1806,18 @@ async def store_message(s: AsyncSession, m: discord.Message) -> None:
             index_elements=[Message.id], set_={"content": values["content"], "edited_at": values["edited_at"]}
         )
     )
+
+
+async def store_messages_bulk(s: AsyncSession, messages: list[discord.Message]) -> None:
+    """Fast path for history scans: one INSERT for a whole page. Existing rows are left alone."""
+    if not messages:
+        return
+    rows = [dict(
+        id=m.id, guild_id=m.guild.id, channel_id=m.channel.id, author_id=m.author.id, content=m.content or "",
+        reply_to_id=m.reference.message_id if m.reference else None, attachment_count=len(m.attachments),
+        created_at=m.created_at, edited_at=m.edited_at,
+    ) for m in messages]
+    await s.execute(insert(Message).values(rows).on_conflict_do_nothing())
 
 
 async def update_message_content(s: AsyncSession, message_id: int, content: str) -> None:
@@ -2141,7 +2192,7 @@ from bot.indexing.ingest import Ingestor
 from bot.logging_setup import setup_logging
 from bot.memory.embeddings import Embedder
 from bot.memory.extractor import MemoryExtractor
-from bot.memory.scanner import Scanner
+from bot.memory.scanner import Lane, Scanner
 from bot.services.privacy import PrivacyState
 from bot.services.responder import Responder
 
@@ -2179,19 +2230,30 @@ class DiscordAIBot(commands.Bot):
         self.privacy = PrivacyState(db)
         self.ingestor = Ingestor(db, self.privacy)
         self.router = AIRouter(settings)
+        # Background memory/lore work can use its own free provider (e.g. Ollama) to save the reply quota.
+        self.worker_router = AIRouter(settings, settings.worker_providers, "background") if settings.worker_providers else None
         self.budget = Budget(settings.ai_max_calls_per_minute, settings.ai_daily_call_limit,
                              settings.ai_user_cooldown_seconds)
         self.personality = load_personality()
         self.embedder = Embedder(settings.database_path.parent / "models")
         self.background_budget = Budget(5, settings.background_daily_call_limit, 0)
-        self.extractor = MemoryExtractor(self, db, self.router, self.embedder, self.privacy, self.background_budget)
+        self.extractor = MemoryExtractor(self, db, self.worker_router or self.router, self.embedder, self.privacy,
+                                         self.background_budget, fallback_router=self.router if self.worker_router else None)
         self.ingestor.on_stored = self.extractor.note
-        self.scanner = Scanner(self, db, Budget(4, settings.history_daily_call_limit, 0))
+        lanes = [Lane("reply AI (" + ", ".join(p.name for p in settings.providers) + ")", self.router,
+                      Budget(4, settings.history_daily_call_limit, 0))]
+        if self.worker_router:
+            # Local/background AI: no daily cap of ours; its own rate limits still apply.
+            lanes.insert(0, Lane("background AI (" + ", ".join(p.name for p in settings.worker_providers) + ")",
+                                 self.worker_router, Budget(60, 1_000_000, 0)))
+        self.scanner = Scanner(self, db, lanes)
         self.responder = Responder(self, self.router, self.budget, db, self.personality, self.embedder, self.privacy)
 
     async def setup_hook(self) -> None:
         await self.privacy.load()
         await self.router.start()
+        if self.worker_router:
+            await self.worker_router.start()
         # Loads (and on first run downloads, ~70 MB) the local embedding model without blocking startup.
         self.loop.create_task(self.embedder.load())
         self.extractor.start()
@@ -2238,6 +2300,8 @@ class DiscordAIBot(commands.Bot):
         self.extractor.stop()
         await super().close()
         await self.router.close()
+        if self.worker_router:
+            await self.worker_router.close()
         await self.db.close()
 
 
@@ -2391,10 +2455,12 @@ importance: 1 = minor, 2 = notable, 3 = legendary server lore."""
 
 
 class MemoryExtractor:
-    def __init__(self, bot, db: Database, router: AIRouter, embedder: Embedder, privacy: PrivacyState, budget: Budget):
+    def __init__(self, bot, db: Database, router: AIRouter, embedder: Embedder, privacy: PrivacyState, budget: Budget,
+                 fallback_router: AIRouter | None = None):
         self.bot = bot
         self.db = db
         self.router = router
+        self.fallback_router = fallback_router  # e.g. Groq, if the local AI (Ollama) isn't running
         self.embedder = embedder
         self.privacy = privacy
         self.budget = budget
@@ -2446,14 +2512,22 @@ class MemoryExtractor:
                 self._pending[channel_id] = ids + self._pending.get(channel_id, [])
                 self._first_pending.setdefault(channel_id, time.monotonic())
                 return 0
+            self.budget.record(None)
             try:
-                return await self.analyze(guild_id, ids) or 0
+                saved = await self.analyze(guild_id, ids)
+                if saved is None and self.fallback_router:
+                    saved = await self.analyze(guild_id, ids, router=self.fallback_router)
+                return saved or 0
             except Exception:
                 log.exception("[MEMORY] extraction failed for channel %s", channel_id)
                 return 0
 
-    async def analyze(self, guild_id: int, ids: list[int]) -> int | None:
-        """One AI call over these stored messages. Returns memories saved, or None if no free AI was available."""
+    async def analyze(self, guild_id: int, ids: list[int], router: AIRouter | None = None) -> int | None:
+        """One AI call over these stored messages. Returns memories saved, or None if no free AI was available.
+
+        router: which AI to use (the history scan passes its own lanes); defaults to this extractor's.
+        """
+        router = router or self.router
         async with self.db.session() as s:
             messages = list(await s.scalars(select(Message).where(Message.id.in_(ids)).order_by(Message.created_at)))
             names = await self._names(s, guild_id, {m.author_id for m in messages})
@@ -2465,9 +2539,8 @@ class MemoryExtractor:
                           for i, m in enumerate(messages))
         prompt = [ChatMessage("system", EXTRACT_PROMPT), ChatMessage("user", f"<chat_batch>\n{lines}\n</chat_batch>")]
 
-        self.budget.record(None)
         try:
-            result = await self.router.chat(prompt, max_tokens=900, temperature=0.2)
+            result = await router.chat(prompt, max_tokens=900, temperature=0.2)
         except AllProvidersUnavailable:
             await self._usage(guild_id, "none", "none", rate_limited=1)
             return None
@@ -2642,38 +2715,57 @@ def _aware(dt: datetime) -> datetime:
 EOF_FILE
 mkdir -p bot/memory
 cat > bot/memory/scanner.py <<'EOF_FILE'
-"""/scanserver: reads a server's message history, then slowly turns it into memories.
+"""/scanserver: reads a server's message history, then turns it into memories.
 
-Phase 1, "fetch" (free, no AI): every message in the chosen channels is saved locally,
-100 at a time, oldest first. Discord's rate limits are respected automatically by
-discord.py, and we pause between pages to be polite.
+Phase 1, "fetch" (free, no AI): every chosen channel is read AT THE SAME TIME (each channel
+has its own Discord rate limit), 100 messages per request, saved in one database write per page.
+discord.py automatically waits when Discord says "slow down".
 
-Phase 2, "digest" (free AI, rate-limited): stored history is read in chunks of 60 and
-turned into memories/lore. Boring chunks are skipped without any AI call. This phase
-runs within HISTORY_DAILY_CALL_LIMIT and simply waits for the next day's free quota.
+Phase 2, "plan" (free, no AI): history is split into conversations (a new one starts after a
+30-minute gap). Each is scored locally: more people, replies, laughing, and recent = better.
+Boring conversations are dropped here without any AI call.
 
-Both phases save a cursor after every step, so a crash or restart resumes where it left off.
+Phase 3, "digest": the best conversations are turned into lore FIRST. Several AI "lanes" work in
+parallel, e.g. Ollama on your Mac (no daily limit) plus Groq's free quota. A lane that's busy or
+out of quota just waits; nothing is ever skipped or paid for.
+
+Every step saves its progress, so a crash or restart resumes where it left off.
 """
 import asyncio
 import logging
+import math
+import re
 import time
-from datetime import timezone
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import discord
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
 from bot.ai.budget import Budget
+from bot.ai.router import AIRouter
 from bot.database import repo
 from bot.database.engine import Database
-from bot.database.models import Message, ScanChannel, ScanJob, utcnow
+from bot.database.models import Message, ScanChannel, ScanChunk, ScanJob, utcnow
 
 log = logging.getLogger("bot.scan")
 
 PAGE = 100
-PAUSE_BETWEEN_PAGES = 0.6   # seconds
-DIGEST_CHUNK = 60
-MIN_WORDS_TO_DIGEST = 120   # chunks with less real text than this are skipped for free
-PROGRESS_EVERY = 10         # seconds between progress message edits
+PARALLEL_CHANNELS = 6
+CONVERSATION_GAP = 30 * 60   # seconds of silence that end a conversation
+MAX_CHUNK = 100              # messages per AI call
+MIN_WORDS_TO_DIGEST = 120    # conversations with less real text are skipped for free
+PROGRESS_EVERY = 10          # seconds between progress message edits
+RETRY_LANE_AFTER = 300       # seconds a lane waits when its AI is unavailable
+_LAUGH = re.compile(r"lmao|lmfao|\blol\b|haha|💀|😭|😂|\bdead\b|crying", re.I)
+
+
+@dataclass
+class Lane:
+    """One source of AI calls for history digestion."""
+    name: str
+    router: AIRouter
+    budget: Budget
 
 
 async def estimate_channel(channel: discord.TextChannel) -> int:
@@ -2692,13 +2784,29 @@ async def estimate_channel(channel: discord.TextChannel) -> int:
     return max(PAGE, int(PAGE * total_span / recent_span))
 
 
+def score_conversation(rows, now: datetime) -> float | None:
+    """rows: (id, author_id, created_at, content, reply_to_id). None = not worth an AI call."""
+    words = sum(len(r[3].split()) for r in rows)
+    if words < MIN_WORDS_TO_DIGEST:
+        return None
+    authors = len({r[1] for r in rows})
+    replies = sum(1 for r in rows if r[4])
+    laughs = sum(1 for r in rows if _LAUGH.search(r[3]))
+    last = rows[-1][2] if rows[-1][2].tzinfo else rows[-1][2].replace(tzinfo=timezone.utc)
+    age_days = max(0.0, (now - last).total_seconds() / 86400)
+    recency = 4 * math.pow(0.5, age_days / 365)
+    return min(authors, 8) * 2 + replies * 0.5 + laughs + min(words, 2000) / 200 + recency
+
+
 class Scanner:
-    def __init__(self, bot, db: Database, budget: Budget):
+    def __init__(self, bot, db: Database, lanes: list[Lane]):
         self.bot = bot
         self.db = db
-        self.budget = budget
+        self.lanes = lanes
         self._tasks: dict[int, asyncio.Task] = {}   # guild_id -> running task
-        self._phase_note: dict[int, str] = {}
+        self._notes: dict[int, dict[str, str]] = {}  # guild_id -> lane name -> what it's doing
+        self._write_lock = asyncio.Lock()            # one database write at a time
+        self._last_progress = 0.0
 
     # ---------- control ----------
 
@@ -2751,7 +2859,7 @@ class Scanner:
             jobs = list(await s.scalars(select(ScanJob).where(ScanJob.status == "running")))
         for job in jobs:
             if not self.is_running(job.guild_id):
-                log.info("[SCAN] resuming job %d after restart", job.id)
+                log.info("[SCAN] resuming job %d (%s phase) after restart", job.id, job.phase)
                 self._start(job.guild_id, job.id)
 
     # ---------- status ----------
@@ -2760,37 +2868,38 @@ class Scanner:
         async with self.db.session() as s:
             job = await s.get(ScanJob, job_id)
             chans = list(await s.scalars(select(ScanChannel).where(ScanChannel.job_id == job_id)))
+            total_chunks = await s.scalar(select(func.count()).select_from(ScanChunk).where(ScanChunk.job_id == job_id))
+            done_chunks = await s.scalar(select(func.count()).select_from(ScanChunk).where(
+                ScanChunk.job_id == job_id, ScanChunk.done.is_(True)))
         fetched = sum(c.fetched for c in chans)
         estimate = sum(max(c.estimate, c.fetched) for c in chans)
-        digested = sum(c.digested for c in chans)
         lines = [f"📚 **server history scan** (job #{job.id}, {job.status})"]
-        current = next((c for c in chans if not c.fetch_done), None)
-        if current:
-            lines.append(f"reading **#{current.name}**... {current.fetched:,} / ~{max(current.estimate, current.fetched):,}")
+        if job.phase == "fetch":
+            for c in [c for c in chans if not c.fetch_done][:PARALLEL_CHANNELS]:
+                lines.append(f"reading **#{c.name}**... {c.fetched:,} / ~{max(c.estimate, c.fetched):,}")
         lines.append(f"channels read: {sum(c.fetch_done for c in chans)}/{len(chans)} · "
-                     f"messages saved: {fetched:,} / ~{estimate:,}")
+                     f"messages saved: {fetched:,}" + (f" / ~{estimate:,}" if job.phase == "fetch" else ""))
+        if job.phase == "plan":
+            lines.append("sorting history into conversations (free, no AI)...")
         if job.phase in ("digest", "done"):
-            lines.append(f"learning lore: {digested:,} / {fetched:,} messages analyzed")
-        note = self._phase_note.get(job.guild_id)
-        if note and job.status == "running":
-            lines.append(f"_{note}_")
+            lines.append(f"learning lore (best conversations first): {done_chunks:,} / {total_chunks:,} conversations")
+        for lane, note in self._notes.get(job.guild_id, {}).items():
+            if job.status == "running":
+                lines.append(f"_{lane}: {note}_")
         if job.status in ("running", "paused"):
             lines.append("`/scanstatus` · `/pausescan` · `/resumescan` · `/stopscan`")
         return "\n".join(lines)
 
     async def _update_progress(self, job: ScanJob, force: bool = False) -> None:
         now = time.monotonic()
-        if not force and now - getattr(self, "_last_progress", 0) < PROGRESS_EVERY:
+        if not force and now - self._last_progress < PROGRESS_EVERY:
             return
         self._last_progress = now
-        if not job.progress_channel_id:
-            return
-        channel = self.bot.get_channel(job.progress_channel_id)
+        channel = self.bot.get_channel(job.progress_channel_id) if job.progress_channel_id else None
         if channel is None:
             return
         try:
-            msg = channel.get_partial_message(job.progress_message_id)
-            await msg.edit(content=await self.status_text(job.id))
+            await channel.get_partial_message(job.progress_message_id).edit(content=await self.status_text(job.id))
         except discord.HTTPException:
             pass  # someone deleted the progress message; the scan carries on
 
@@ -2806,35 +2915,51 @@ class Scanner:
                 return await self._finish(job, "stopped")
             if job.phase == "fetch":
                 await self._fetch_all(job, guild)
-                async with self.db.session() as s:
-                    (await s.get(ScanJob, job_id)).phase = "digest"
-                job.phase = "digest"
-                await self._update_progress(job, force=True)
-            await self._digest_all(job, guild)
+                await self._set_phase(job, "plan")
+            if job.phase in ("plan", "digest"):  # "digest" without chunks = job from an older version
+                await self._plan(job)
+                await self._set_phase(job, "digest")
+            await self._digest(job)
             await self._finish(job, "done")
         except asyncio.CancelledError:
             raise  # paused or stopped; progress is already saved
         except Exception:
             log.exception("[SCAN] job %d crashed; it will resume on next restart or /resumescan", job_id)
 
+    async def _set_phase(self, job: ScanJob, phase: str) -> None:
+        async with self.db.session() as s:
+            (await s.get(ScanJob, job.id)).phase = phase
+        job.phase = phase
+        log.info("[SCAN] job %d → %s phase", job.id, phase)
+        await self._update_progress(job, force=True)
+
     async def _finish(self, job: ScanJob, status: str) -> None:
         async with self.db.session() as s:
             row = await s.get(ScanJob, job.id)
-            row.status, row.phase, row.updated_at = status, "done" if status == "done" else row.phase, utcnow()
+            row.status, row.updated_at = status, utcnow()
+            if status == "done":
+                row.phase = "done"
         job.status = status
-        self._phase_note.pop(job.guild_id, None)
+        self._notes.pop(job.guild_id, None)
         log.info("[SCAN] job %d %s", job.id, status)
         await self._update_progress(job, force=True)
+
+    # --- phase 1: fetch ---
 
     async def _fetch_all(self, job: ScanJob, guild: discord.Guild) -> None:
         async with self.db.session() as s:
             chans = list(await s.scalars(select(ScanChannel).where(ScanChannel.job_id == job.id, ScanChannel.fetch_done.is_(False))))
-        for sc in chans:
-            channel = guild.get_channel(sc.channel_id)
-            if channel is None or self.bot.privacy.channel_excluded(channel):
-                await self._mark(job.id, sc.channel_id, fetch_done=True)
-                continue
-            await self._fetch_channel(job, channel, sc)
+        limit = asyncio.Semaphore(PARALLEL_CHANNELS)
+
+        async def one(sc: ScanChannel) -> None:
+            async with limit:
+                channel = guild.get_channel(sc.channel_id)
+                if channel is None or self.bot.privacy.channel_excluded(channel):
+                    await self._mark(job.id, sc.channel_id, fetch_done=True)
+                    return
+                await self._fetch_channel(job, channel, sc)
+
+        await asyncio.gather(*(one(sc) for sc in chans))
 
     async def _fetch_channel(self, job: ScanJob, channel: discord.TextChannel, sc: ScanChannel) -> None:
         cursor, fetched = sc.fetch_cursor, sc.fetched
@@ -2845,72 +2970,122 @@ class Scanner:
             async for m in channel.history(limit=None, after=after, oldest_first=True):
                 batch.append(m)
                 if len(batch) >= PAGE:
-                    cursor, fetched = await self._save_page(job, sc.channel_id, batch, fetched)
+                    fetched = await self._save_page(job, sc.channel_id, batch, fetched)
                     batch = []
                     await self._update_progress(job)
-                    await asyncio.sleep(PAUSE_BETWEEN_PAGES)
             if batch:
-                cursor, fetched = await self._save_page(job, sc.channel_id, batch, fetched)
+                fetched = await self._save_page(job, sc.channel_id, batch, fetched)
         except discord.Forbidden:
             log.warning("[SCAN] no permission to read #%s history; skipping it", channel.name)
         await self._mark(job.id, sc.channel_id, fetch_done=True)
-        log.info("[SCAN] finished reading #%s (%d messages seen)", channel.name, fetched)
+        log.info("[SCAN] finished reading #%s (%d messages saved)", channel.name, fetched)
 
-    async def _save_page(self, job: ScanJob, channel_id: int, batch: list[discord.Message], fetched: int):
+    async def _save_page(self, job: ScanJob, channel_id: int, batch: list[discord.Message], fetched: int) -> int:
         keep = [m for m in batch if self.bot.ingestor.should_store(m)]
-        async with self.db.session() as s:
-            authors = {}
-            for m in keep:
-                await repo.store_message(s, m)
-                authors[m.author.id] = m.author
+        authors = {m.author.id: m.author for m in keep}
+        async with self._write_lock, self.db.session() as s:
+            await repo.store_messages_bulk(s, keep)
             for author in authors.values():
                 await repo.upsert_user_names(s, author, job.guild_id)
             row = await s.get(ScanChannel, (job.id, channel_id))
             row.fetch_cursor, row.fetched = batch[-1].id, fetched + len(keep)
-        return batch[-1].id, fetched + len(keep)
+        return fetched + len(keep)
 
-    async def _digest_all(self, job: ScanJob, guild: discord.Guild) -> None:
-        # Only digest history from before the scan started; newer chat is handled live.
-        cutoff = discord.utils.time_snowflake(job.created_at.replace(tzinfo=job.created_at.tzinfo or timezone.utc))
+    # --- phase 2: plan ---
+
+    async def _plan(self, job: ScanJob) -> None:
         async with self.db.session() as s:
-            chans = list(await s.scalars(select(ScanChannel).where(ScanChannel.job_id == job.id, ScanChannel.digest_done.is_(False))))
-        for sc in chans:
-            cursor, digested = sc.digest_cursor, sc.digested
-            while True:
-                async with self.db.session() as s:
-                    rows = list(await s.execute(
-                        select(Message.id, Message.content).where(
-                            Message.channel_id == sc.channel_id, Message.id > cursor, Message.id < cutoff)
-                        .order_by(Message.id).limit(DIGEST_CHUNK)))
-                if not rows:
-                    break
-                ids = [r[0] for r in rows]
-                words = sum(len(r[1].split()) for r in rows)
-                if words >= MIN_WORDS_TO_DIGEST:
-                    await self._wait_for_budget(job)
-                    self.budget.record(None)
-                    saved = await self.bot.extractor.analyze(job.guild_id, ids)
-                    if saved is None:  # free AI unavailable right now: wait, then retry this same chunk
-                        self._phase_note[job.guild_id] = "free AI busy, retrying in 5 minutes"
-                        await self._update_progress(job, force=True)
-                        await asyncio.sleep(300)
-                        continue
-                self._phase_note.pop(job.guild_id, None)
-                cursor, digested = ids[-1], digested + len(ids)
-                await self._mark(job.id, sc.channel_id, digest_cursor=cursor, digested=digested)
-                await self._update_progress(job)
-            await self._mark(job.id, sc.channel_id, digest_done=True)
+            if await s.scalar(select(func.count()).select_from(ScanChunk).where(ScanChunk.job_id == job.id)):
+                return  # already planned before a restart
+            channel_ids = list(await s.scalars(select(ScanChannel.channel_id).where(ScanChannel.job_id == job.id)))
+        cutoff = self._cutoff(job)
+        now = datetime.now(timezone.utc)
+        kept = skipped = 0
+        for channel_id in channel_ids:
+            conv, chunks = [], []
 
-    async def _wait_for_budget(self, job: ScanJob) -> None:
-        while (reason := self.budget.blocked_reason(None)):
-            self._phase_note[job.guild_id] = (
-                "used today's free AI allowance for history; continuing tomorrow" if "daily" in reason
-                else "pacing AI calls")
-            await self._update_progress(job, force=True)
-            await asyncio.sleep(600 if "daily" in reason else 20)
+            def close():
+                nonlocal kept, skipped
+                if conv:
+                    score = score_conversation(conv, now)
+                    if score is None:
+                        skipped += 1
+                    else:
+                        chunks.append(ScanChunk(job_id=job.id, channel_id=channel_id, start_id=conv[0][0],
+                                                end_id=conv[-1][0], n_messages=len(conv), score=score, done=False))
+                        kept += 1
+
+            async with self.db.session() as s:
+                result = await s.stream(
+                    select(Message.id, Message.author_id, Message.created_at, Message.content, Message.reply_to_id)
+                    .where(Message.channel_id == channel_id, Message.id < cutoff).order_by(Message.id))
+                prev_time = None
+                async for row in result:
+                    t = row[2] if row[2].tzinfo else row[2].replace(tzinfo=timezone.utc)
+                    if conv and ((t - prev_time).total_seconds() > CONVERSATION_GAP or len(conv) >= MAX_CHUNK):
+                        close()
+                        conv = []
+                    conv.append(tuple(row))
+                    prev_time = t
+                close()
+            async with self._write_lock, self.db.session() as s:
+                s.add_all(chunks)
+            await asyncio.sleep(0)  # let the bot answer chat between channels
+        log.info("[SCAN] job %d planned: %d conversations to learn from, %d boring ones skipped", job.id, kept, skipped)
+
+    # --- phase 3: digest ---
+
+    async def _digest(self, job: ScanJob) -> None:
+        async with self.db.session() as s:
+            todo = list(await s.execute(select(ScanChunk.id, ScanChunk.channel_id, ScanChunk.start_id, ScanChunk.end_id)
+                                        .where(ScanChunk.job_id == job.id, ScanChunk.done.is_(False))
+                                        .order_by(ScanChunk.score.desc())))
+        if not todo or not self.lanes:
+            return
+        queue: asyncio.Queue = asyncio.Queue()
+        for row in todo:
+            queue.put_nowait(tuple(row))
+        await asyncio.gather(*(self._lane_worker(job, lane, queue) for lane in self.lanes))
+
+    async def _lane_worker(self, job: ScanJob, lane: Lane, queue: asyncio.Queue) -> None:
+        notes = self._notes.setdefault(job.guild_id, {})
+        cutoff = self._cutoff(job)
+        while not queue.empty():
+            while (reason := lane.budget.blocked_reason(None)):
+                notes[lane.name] = "used today's free quota, continuing tomorrow" if "daily" in reason else "pacing"
+                await asyncio.sleep(600 if "daily" in reason else 15)
+            try:
+                chunk_id, channel_id, start_id, end_id = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            async with self.db.session() as s:
+                ids = list(await s.scalars(select(Message.id).where(
+                    Message.channel_id == channel_id, Message.id >= start_id, Message.id <= end_id,
+                    Message.id < cutoff).order_by(Message.id)))
+            lane.budget.record(None)
+            saved = await self.bot.extractor.analyze(job.guild_id, ids, router=lane.router) if ids else 0
+            if saved is None:
+                queue.put_nowait((chunk_id, channel_id, start_id, end_id))  # another lane (or this one later) retries it
+                notes[lane.name] = "AI unavailable, retrying in 5 min"
+                await self._update_progress(job, force=True)
+                await asyncio.sleep(RETRY_LANE_AFTER)
+                continue
+            notes[lane.name] = "learning"
+            async with self._write_lock, self.db.session() as s:
+                await s.execute(update(ScanChunk).where(ScanChunk.id == chunk_id).values(done=True))
+            await self._update_progress(job)
+        notes.pop(lane.name, None)
+
+    # --- helpers ---
+
+    @staticmethod
+    def _cutoff(job: ScanJob) -> int:
+        """History = messages from before the scan started. Newer chat is learned live."""
+        created = job.created_at if job.created_at.tzinfo else job.created_at.replace(tzinfo=timezone.utc)
+        return discord.utils.time_snowflake(created)
 
     async def _mark(self, job_id: int, channel_id: int, **fields) -> None:
-        async with self.db.session() as s:
+        async with self._write_lock, self.db.session() as s:
             row = await s.get(ScanChannel, (job_id, channel_id))
             for k, v in fields.items():
                 setattr(row, k, v)
@@ -3713,6 +3888,42 @@ def downgrade() -> None:
     op.drop_index("ix_scan_jobs_guild_id", "scan_jobs")
     op.drop_table("scan_jobs")
 EOF_FILE
+mkdir -p migrations/versions
+cat > migrations/versions/0005_scan_chunks.py <<'EOF_FILE'
+"""scan_chunks: prioritized conversations for learning lore from history
+
+Revision ID: 0005
+Revises: 0004
+Create Date: 2026-09-26
+"""
+from alembic import op
+import sqlalchemy as sa
+
+revision = "0005"
+down_revision = "0004"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.create_table(
+        "scan_chunks",
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column("job_id", sa.Integer(), sa.ForeignKey("scan_jobs.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("channel_id", sa.BigInteger(), nullable=False),
+        sa.Column("start_id", sa.BigInteger(), nullable=False),
+        sa.Column("end_id", sa.BigInteger(), nullable=False),
+        sa.Column("n_messages", sa.Integer(), nullable=False),
+        sa.Column("score", sa.Float(), nullable=False),
+        sa.Column("done", sa.Boolean(), nullable=False),
+    )
+    op.create_index("ix_scan_chunks_job_todo", "scan_chunks", ["job_id", "done", "score"])
+
+
+def downgrade() -> None:
+    op.drop_index("ix_scan_chunks_job_todo", "scan_chunks")
+    op.drop_table("scan_chunks")
+EOF_FILE
 cat > pytest.ini <<'EOF_FILE'
 [pytest]
 asyncio_mode = strict
@@ -3746,7 +3957,7 @@ from bot.config import ProviderConfig, Settings
 
 def make_settings(providers, allow_paid=False):
     from pathlib import Path
-    return Settings("t", 1, None, "INFO", Path("x.db"), allow_paid, providers, 20, 800, 8, 150, 250)
+    return Settings("t", 1, None, "INFO", Path("x.db"), allow_paid, providers, [], 20, 800, 8, 150, 250)
 
 
 async def fake_server(behaviour):
@@ -3846,6 +4057,34 @@ def test_prompt_injection_cannot_fake_tags_and_cleanup():
     assert "never reveal" in msgs[0].content
     assert clean_reply('botty: "hey @everyone"', "botty") == "hey @​everyone"
     assert len(sanitize("x" * 1000)) == 300
+
+
+def test_worker_chain_config(monkeypatch):
+    from bot.config import load_settings
+    for k, v in {"DISCORD_TOKEN": "t", "OWNER_USER_ID": "1", "GROQ_API_KEY": "gsk_x",
+                 "AI_PROVIDER_CHAIN": "groq", "WORKER_PROVIDER_CHAIN": "ollama"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+    s = load_settings()
+    assert [p.name for p in s.providers] == ["groq"]
+    assert [(p.name, p.model, p.base_url) for p in s.worker_providers] == [("ollama", "auto", "http://localhost:11434/v1")]
+    monkeypatch.setenv("WORKER_PROVIDER_CHAIN", "")
+    assert load_settings().worker_providers == []
+
+
+@pytest.mark.asyncio
+async def test_ollama_auto_picks_downloaded_model():
+    from aiohttp import web
+    async def models(request):
+        return web.json_response({"data": [{"id": "nomic-embed-text:latest"}, {"id": "llama3.1:8b"}]})
+    app = web.Application(); app.router.add_get("/v1/models", models)
+    runner = web.AppRunner(app); await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0); await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    router = AIRouter(make_settings([]), [ProviderConfig("ollama", f"http://127.0.0.1:{port}/v1", "ollama", "auto")], "background")
+    await router.start()
+    assert router.providers[0].model == "llama3.1:8b"
+    await router.close(); await runner.cleanup()
 EOF_FILE
 mkdir -p tests
 cat > tests/test_memory.py <<'EOF_FILE'
@@ -4017,9 +4256,9 @@ from bot.ai.budget import Budget
 from bot.database import repo
 from bot.database.engine import Database
 from bot.database.migrate import upgrade_to_latest
-from bot.database.models import Message, ScanChannel, ScanJob
+from bot.database.models import Message, ScanChannel, ScanChunk, ScanJob
 from bot.memory import scanner as scanner_mod
-from bot.memory.scanner import Scanner, estimate_channel
+from bot.memory.scanner import Lane, Scanner, estimate_channel
 
 START = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
@@ -4057,7 +4296,6 @@ class FakeChannel:
 
 @pytest_asyncio.fixture
 async def env(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(scanner_mod, "PAUSE_BETWEEN_PAGES", 0)
     upgrade_to_latest(tmp_path / "bot.db")
     db = Database(tmp_path / "bot.db")
     async with db.session() as s:
@@ -4069,8 +4307,8 @@ async def env(tmp_path: Path, monkeypatch):
 def fake_bot(db, channel, analyze_results):
     calls = []
 
-    async def analyze(guild_id, ids):
-        calls.append(ids)
+    async def analyze(guild_id, ids, router=None):
+        calls.append((router, ids))
         return analyze_results.pop(0) if analyze_results else 1
 
     guild = SimpleNamespace(id=1, get_channel=lambda cid: channel if cid == 10 else None)
@@ -4084,14 +4322,15 @@ def fake_bot(db, channel, analyze_results):
 
 
 @pytest.mark.asyncio
-async def test_scan_resumes_after_crash_and_digests(env, monkeypatch):
+async def test_scan_resumes_after_crash_and_digests_best_first(env, monkeypatch):
     db = env
     msgs = make_msgs(250) + make_msgs(60, words=1)  # last 60 are boring one-word messages
     for i, m in enumerate(msgs[250:]):
         m.id = msgs[249].id + 1000 + i
     channel = FakeChannel(msgs, fail_after=150)
     bot, guild, calls = fake_bot(db, channel, [])
-    scanner = Scanner(bot, db, Budget(100, 100, 0))
+    scanner = Scanner(bot, db, [Lane("local", "ollama-router", Budget(100, 1000, 0)),
+                                Lane("cloud", "groq-router", Budget(100, 1, 0))])
 
     job_id = await scanner.create_job(guild, [(channel, 300)], 99, None)
     await scanner._tasks[1]  # crashes after 150 reads; first full page (100) was saved
@@ -4106,12 +4345,15 @@ async def test_scan_resumes_after_crash_and_digests(env, monkeypatch):
     await scanner._tasks[1]
     async with db.session() as s:
         assert await s.scalar(select(func.count()).select_from(Message)) == 310
-        sc = await s.get(ScanChannel, (job_id, 10))
-        assert sc.fetch_done and sc.digest_done and sc.digested == 310
+        assert (await s.get(ScanChannel, (job_id, 10))).fetch_done
         assert (await s.get(ScanJob, job_id)).status == "done"
-    # 310 messages → 6 chunks; the last two are mostly one-word messages, skipped without an AI call
-    assert len(calls) == 4 and all(len(c) <= 60 for c in calls)
-    assert "done" in await scanner.status_text(job_id)
+        chunks = list(await s.scalars(select(ScanChunk).order_by(ScanChunk.score.desc())))
+    # 250 chatty messages → 3 conversations (100/100/50); the 60 one-word messages are skipped for free
+    assert len(chunks) == 3 and all(c.done for c in chunks)
+    assert len(calls) == 3 and all(len(ids) <= 100 for _, ids in calls)
+    # both lanes worked, and the cloud lane respected its 1-call daily budget
+    assert sum(1 for r, _ in calls if r == "groq-router") <= 1 and any(r == "ollama-router" for r, _ in calls)
+    assert "3 / 3 conversations" in await scanner.status_text(job_id)
 
 
 @pytest.mark.asyncio
@@ -4119,20 +4361,28 @@ async def test_digest_retries_when_ai_unavailable(env, monkeypatch):
     db = env
     channel = FakeChannel(make_msgs(60))
     bot, guild, calls = fake_bot(db, channel, [None, 2])  # first attempt: no free AI available
-    real_sleep = asyncio.sleep
-    monkeypatch.setattr(scanner_mod.asyncio, "sleep", lambda s: real_sleep(0))
-    scanner = Scanner(bot, db, Budget(100, 100, 0))
+    monkeypatch.setattr(scanner_mod, "RETRY_LANE_AFTER", 0)
+    scanner = Scanner(bot, db, [Lane("local", "r", Budget(100, 100, 0))])
     job_id = await scanner.create_job(guild, [(channel, 60)], 99, None)
     async with db.session() as s:
         (await s.get(ScanJob, job_id)).created_at = datetime.now(timezone.utc)
     await scanner._tasks[1]
-    assert len(calls) == 2 and calls[0] == calls[1]  # same chunk retried, nothing skipped
+    assert len(calls) == 2 and calls[0] == calls[1]  # same conversation retried, nothing skipped
 
 
 @pytest.mark.asyncio
 async def test_estimate():
     assert await estimate_channel(FakeChannel(make_msgs(40))) == 40
     assert 900 <= await estimate_channel(FakeChannel(make_msgs(1000))) <= 1100
+
+
+def test_scoring_prefers_lively_recent_conversations():
+    from bot.memory.scanner import score_conversation
+    now = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    old_quiet = [(i, 7, datetime(2020, 1, 1, tzinfo=timezone.utc), "just some words here and there ok", None) for i in range(30)]
+    lively = [(i, 7 + i % 5, datetime(2026, 8, 1, tzinfo=timezone.utc), "lmao no way he actually did that 💀", 1) for i in range(30)]
+    assert score_conversation(lively, now) > score_conversation(old_quiet, now)
+    assert score_conversation(old_quiet[:3], now) is None  # too little text to bother the AI
 EOF_FILE
 mkdir -p tests
 cat > tests/test_storage.py <<'EOF_FILE'
@@ -4215,7 +4465,8 @@ async def test_upgrade_existing_0001_database(tmp_path: Path):
     path = tmp_path / "bot.db"
     command.upgrade(_alembic_config(path), "0001")
     assert current_revision(path) == "0001"
-    assert upgrade_to_latest(path) == "0004"
+    latest = upgrade_to_latest(path)
+    assert latest > "0001" and current_revision(path) == latest
     assert list((tmp_path / "backups").glob("bot-*.db"))
 
 
@@ -4226,7 +4477,7 @@ def test_slash_commands_are_valid():
     from bot.main import EXTENSIONS, DiscordAIBot
 
     async def load():
-        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], 20, 800, 8, 150, 250)
+        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], [], 20, 800, 8, 150, 250)
         bot = DiscordAIBot(settings, Database(Path("/tmp/unused-test.db")), "0002")
         for ext in EXTENSIONS:
             await bot.load_extension(ext)
@@ -4268,6 +4519,8 @@ add_default GROQ_API_KEY ""
 add_default GROQ_MODEL auto
 add_default BACKGROUND_DAILY_CALL_LIMIT 150
 add_default HISTORY_DAILY_CALL_LIMIT 250
+add_default OLLAMA_MODEL auto
+add_default WORKER_PROVIDER_CHAIN ollama
 if ! grep -qE '^DISCORD_TOKEN=.+' .env; then echo "⚠️  DISCORD_TOKEN missing in .env"; fi
 if ! grep -qE '^GROQ_API_KEY=.+' .env; then echo "⚠️  GROQ_API_KEY missing in .env"; fi
 echo "✅ files updated, secrets kept"
@@ -4288,6 +4541,8 @@ add_default GROQ_API_KEY ""
 add_default GROQ_MODEL auto
 add_default BACKGROUND_DAILY_CALL_LIMIT 150
 add_default HISTORY_DAILY_CALL_LIMIT 250
+add_default OLLAMA_MODEL auto
+add_default WORKER_PROVIDER_CHAIN ollama
 if ! grep -qE '^DISCORD_TOKEN=.+' .env; then echo "⚠️  DISCORD_TOKEN missing in .env"; fi
 if ! grep -qE '^GROQ_API_KEY=.+' .env; then echo "⚠️  GROQ_API_KEY missing in .env"; fi
 echo "✅ files updated, secrets kept"

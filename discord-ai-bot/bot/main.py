@@ -17,7 +17,7 @@ from bot.indexing.ingest import Ingestor
 from bot.logging_setup import setup_logging
 from bot.memory.embeddings import Embedder
 from bot.memory.extractor import MemoryExtractor
-from bot.memory.scanner import Scanner
+from bot.memory.scanner import Lane, Scanner
 from bot.services.privacy import PrivacyState
 from bot.services.responder import Responder
 
@@ -55,19 +55,30 @@ class DiscordAIBot(commands.Bot):
         self.privacy = PrivacyState(db)
         self.ingestor = Ingestor(db, self.privacy)
         self.router = AIRouter(settings)
+        # Background memory/lore work can use its own free provider (e.g. Ollama) to save the reply quota.
+        self.worker_router = AIRouter(settings, settings.worker_providers, "background") if settings.worker_providers else None
         self.budget = Budget(settings.ai_max_calls_per_minute, settings.ai_daily_call_limit,
                              settings.ai_user_cooldown_seconds)
         self.personality = load_personality()
         self.embedder = Embedder(settings.database_path.parent / "models")
         self.background_budget = Budget(5, settings.background_daily_call_limit, 0)
-        self.extractor = MemoryExtractor(self, db, self.router, self.embedder, self.privacy, self.background_budget)
+        self.extractor = MemoryExtractor(self, db, self.worker_router or self.router, self.embedder, self.privacy,
+                                         self.background_budget, fallback_router=self.router if self.worker_router else None)
         self.ingestor.on_stored = self.extractor.note
-        self.scanner = Scanner(self, db, Budget(4, settings.history_daily_call_limit, 0))
+        lanes = [Lane("reply AI (" + ", ".join(p.name for p in settings.providers) + ")", self.router,
+                      Budget(4, settings.history_daily_call_limit, 0))]
+        if self.worker_router:
+            # Local/background AI: no daily cap of ours; its own rate limits still apply.
+            lanes.insert(0, Lane("background AI (" + ", ".join(p.name for p in settings.worker_providers) + ")",
+                                 self.worker_router, Budget(60, 1_000_000, 0)))
+        self.scanner = Scanner(self, db, lanes)
         self.responder = Responder(self, self.router, self.budget, db, self.personality, self.embedder, self.privacy)
 
     async def setup_hook(self) -> None:
         await self.privacy.load()
         await self.router.start()
+        if self.worker_router:
+            await self.worker_router.start()
         # Loads (and on first run downloads, ~70 MB) the local embedding model without blocking startup.
         self.loop.create_task(self.embedder.load())
         self.extractor.start()
@@ -114,6 +125,8 @@ class DiscordAIBot(commands.Bot):
         self.extractor.stop()
         await super().close()
         await self.router.close()
+        if self.worker_router:
+            await self.worker_router.close()
         await self.db.close()
 
 

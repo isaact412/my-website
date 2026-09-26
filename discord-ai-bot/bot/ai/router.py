@@ -19,18 +19,22 @@ class AllProvidersUnavailable(Exception):
 
 
 class AIRouter:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, providers=None, label: str = "replies"):
         self.settings = settings
+        self.label = label
+        self._configs = settings.providers if providers is None else providers
         self.guard = FreeGuard(settings.allow_paid_models)
         self._session: aiohttp.ClientSession | None = None
         self.providers: list[OpenAICompatibleProvider] = []
         self._cooling_until: dict[str, float] = {}
 
     async def start(self) -> None:
-        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=40))
-        self.providers = [OpenAICompatibleProvider(cfg, self._session) for cfg in self.settings.providers]
+        # Local models can take a while on long batches, so background work gets a longer timeout.
+        timeout = 40 if self.label == "replies" else 240
+        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout))
+        self.providers = [OpenAICompatibleProvider(cfg, self._session) for cfg in self._configs]
         mode = "PAID ALLOWED" if self.settings.allow_paid_models else "free only"
-        log.info("AI providers: %s (%s)", ", ".join(p.name for p in self.providers) or "none", mode)
+        log.info("AI providers for %s: %s (%s)", self.label, ", ".join(p.name for p in self.providers) or "none", mode)
         for p in self.providers:
             try:
                 await p.resolve_model()

@@ -27,6 +27,7 @@ class Settings:
     database_path: Path
     allow_paid_models: bool
     providers: list[ProviderConfig]
+    worker_providers: list[ProviderConfig]  # background memory/lore work; empty = use `providers`
     ai_max_calls_per_minute: int
     ai_daily_call_limit: int
     ai_user_cooldown_seconds: int
@@ -71,17 +72,17 @@ def _bool(name: str, default: bool) -> bool:
 _PROVIDER_DEFAULTS = {
     "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "GROQ_MODEL", "auto"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "openrouter/free"),
-    "ollama": (None, None, "OLLAMA_MODEL", ""),
+    "ollama": (None, None, "OLLAMA_MODEL", "auto"),
 }
 
 
-def _load_providers() -> list[ProviderConfig]:
-    chain = [p.strip().lower() for p in _get("AI_PROVIDER_CHAIN", "groq").split(",") if p.strip()]
+def _load_providers(chain_var: str, default: str) -> list[ProviderConfig]:
+    chain = [p.strip().lower() for p in _get(chain_var, default).split(",") if p.strip()]
     providers = []
     for name in chain:
         if name not in _PROVIDER_DEFAULTS:
             raise ConfigError(
-                f"Unknown provider {name!r} in AI_PROVIDER_CHAIN. Free options: groq, openrouter, ollama. "
+                f"Unknown provider {name!r} in {chain_var}. Free options: groq, openrouter, ollama. "
                 "(Paid providers aren't built in yet, on purpose.)"
             )
         base_url, key_var, model_var, default_model = _PROVIDER_DEFAULTS[name]
@@ -91,10 +92,10 @@ def _load_providers() -> list[ProviderConfig]:
         else:
             api_key = _get(key_var)
             if not api_key:
-                raise ConfigError(f"{name} is in AI_PROVIDER_CHAIN but {key_var} is empty in .env.")
+                raise ConfigError(f"{name} is in {chain_var} but {key_var} is empty in .env.")
         model = _get(model_var, default_model) or default_model
         if not model:
-            raise ConfigError(f"{name} is in AI_PROVIDER_CHAIN but {model_var} is empty in .env.")
+            raise ConfigError(f"{name} is in {chain_var} but {model_var} is empty in .env.")
         providers.append(ProviderConfig(name=name, base_url=base_url, api_key=api_key, model=model))
     return providers
 
@@ -117,7 +118,8 @@ def load_settings() -> Settings:
         log_level=_get("LOG_LEVEL", "INFO").upper() or "INFO",
         database_path=Path(_get("DATABASE_PATH", "data/bot.db") or "data/bot.db"),
         allow_paid_models=_bool("ALLOW_PAID_MODELS", False),
-        providers=_load_providers(),
+        providers=_load_providers("AI_PROVIDER_CHAIN", "groq"),
+        worker_providers=_load_providers("WORKER_PROVIDER_CHAIN", ""),
         ai_max_calls_per_minute=_int("AI_MAX_CALLS_PER_MINUTE", 20),
         ai_daily_call_limit=_int("AI_DAILY_CALL_LIMIT", 800),
         ai_user_cooldown_seconds=_int("AI_USER_COOLDOWN_SECONDS", 8),
@@ -128,4 +130,5 @@ def load_settings() -> Settings:
 
 def secret_values(settings: Settings) -> list[str]:
     """Everything that must never appear in logs."""
-    return [settings.discord_token] + [p.api_key for p in settings.providers if p.name != "ollama"]
+    return [settings.discord_token] + [
+        p.api_key for p in settings.providers + settings.worker_providers if p.name != "ollama"]

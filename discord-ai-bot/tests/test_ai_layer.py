@@ -14,7 +14,7 @@ from bot.config import ProviderConfig, Settings
 
 def make_settings(providers, allow_paid=False):
     from pathlib import Path
-    return Settings("t", 1, None, "INFO", Path("x.db"), allow_paid, providers, 20, 800, 8, 150, 250)
+    return Settings("t", 1, None, "INFO", Path("x.db"), allow_paid, providers, [], 20, 800, 8, 150, 250)
 
 
 async def fake_server(behaviour):
@@ -114,3 +114,31 @@ def test_prompt_injection_cannot_fake_tags_and_cleanup():
     assert "never reveal" in msgs[0].content
     assert clean_reply('botty: "hey @everyone"', "botty") == "hey @​everyone"
     assert len(sanitize("x" * 1000)) == 300
+
+
+def test_worker_chain_config(monkeypatch):
+    from bot.config import load_settings
+    for k, v in {"DISCORD_TOKEN": "t", "OWNER_USER_ID": "1", "GROQ_API_KEY": "gsk_x",
+                 "AI_PROVIDER_CHAIN": "groq", "WORKER_PROVIDER_CHAIN": "ollama"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+    s = load_settings()
+    assert [p.name for p in s.providers] == ["groq"]
+    assert [(p.name, p.model, p.base_url) for p in s.worker_providers] == [("ollama", "auto", "http://localhost:11434/v1")]
+    monkeypatch.setenv("WORKER_PROVIDER_CHAIN", "")
+    assert load_settings().worker_providers == []
+
+
+@pytest.mark.asyncio
+async def test_ollama_auto_picks_downloaded_model():
+    from aiohttp import web
+    async def models(request):
+        return web.json_response({"data": [{"id": "nomic-embed-text:latest"}, {"id": "llama3.1:8b"}]})
+    app = web.Application(); app.router.add_get("/v1/models", models)
+    runner = web.AppRunner(app); await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0); await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    router = AIRouter(make_settings([]), [ProviderConfig("ollama", f"http://127.0.0.1:{port}/v1", "ollama", "auto")], "background")
+    await router.start()
+    assert router.providers[0].model == "llama3.1:8b"
+    await router.close(); await runner.cleanup()

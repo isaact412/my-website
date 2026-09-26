@@ -25,6 +25,8 @@ add_default GROQ_API_KEY ""
 add_default GROQ_MODEL auto
 add_default BACKGROUND_DAILY_CALL_LIMIT 150
 add_default HISTORY_DAILY_CALL_LIMIT 250
+add_default OLLAMA_MODEL auto
+add_default WORKER_PROVIDER_CHAIN ollama
 if ! grep -qE '^DISCORD_TOKEN=.+' .env; then echo "⚠️  DISCORD_TOKEN missing in .env"; fi
 if ! grep -qE '^GROQ_API_KEY=.+' .env; then echo "⚠️  GROQ_API_KEY missing in .env"; fi
 echo "✅ files updated, secrets kept"

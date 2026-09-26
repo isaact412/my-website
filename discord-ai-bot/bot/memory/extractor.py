@@ -62,10 +62,12 @@ importance: 1 = minor, 2 = notable, 3 = legendary server lore."""
 
 
 class MemoryExtractor:
-    def __init__(self, bot, db: Database, router: AIRouter, embedder: Embedder, privacy: PrivacyState, budget: Budget):
+    def __init__(self, bot, db: Database, router: AIRouter, embedder: Embedder, privacy: PrivacyState, budget: Budget,
+                 fallback_router: AIRouter | None = None):
         self.bot = bot
         self.db = db
         self.router = router
+        self.fallback_router = fallback_router  # e.g. Groq, if the local AI (Ollama) isn't running
         self.embedder = embedder
         self.privacy = privacy
         self.budget = budget
@@ -117,14 +119,22 @@ class MemoryExtractor:
                 self._pending[channel_id] = ids + self._pending.get(channel_id, [])
                 self._first_pending.setdefault(channel_id, time.monotonic())
                 return 0
+            self.budget.record(None)
             try:
-                return await self.analyze(guild_id, ids) or 0
+                saved = await self.analyze(guild_id, ids)
+                if saved is None and self.fallback_router:
+                    saved = await self.analyze(guild_id, ids, router=self.fallback_router)
+                return saved or 0
             except Exception:
                 log.exception("[MEMORY] extraction failed for channel %s", channel_id)
                 return 0
 
-    async def analyze(self, guild_id: int, ids: list[int]) -> int | None:
-        """One AI call over these stored messages. Returns memories saved, or None if no free AI was available."""
+    async def analyze(self, guild_id: int, ids: list[int], router: AIRouter | None = None) -> int | None:
+        """One AI call over these stored messages. Returns memories saved, or None if no free AI was available.
+
+        router: which AI to use (the history scan passes its own lanes); defaults to this extractor's.
+        """
+        router = router or self.router
         async with self.db.session() as s:
             messages = list(await s.scalars(select(Message).where(Message.id.in_(ids)).order_by(Message.created_at)))
             names = await self._names(s, guild_id, {m.author_id for m in messages})
@@ -136,9 +146,8 @@ class MemoryExtractor:
                           for i, m in enumerate(messages))
         prompt = [ChatMessage("system", EXTRACT_PROMPT), ChatMessage("user", f"<chat_batch>\n{lines}\n</chat_batch>")]
 
-        self.budget.record(None)
         try:
-            result = await self.router.chat(prompt, max_tokens=900, temperature=0.2)
+            result = await router.chat(prompt, max_tokens=900, temperature=0.2)
         except AllProvidersUnavailable:
             await self._usage(guild_id, "none", "none", rate_limited=1)
             return None

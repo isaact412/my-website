@@ -77,7 +77,8 @@ async def test_upgrade_existing_0001_database(tmp_path: Path):
     path = tmp_path / "bot.db"
     command.upgrade(_alembic_config(path), "0001")
     assert current_revision(path) == "0001"
-    assert upgrade_to_latest(path) == "0004"
+    latest = upgrade_to_latest(path)
+    assert latest > "0001" and current_revision(path) == latest
     assert list((tmp_path / "backups").glob("bot-*.db"))
 
 
@@ -88,7 +89,7 @@ def test_slash_commands_are_valid():
     from bot.main import EXTENSIONS, DiscordAIBot
 
     async def load():
-        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], 20, 800, 8, 150, 250)
+        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], [], 20, 800, 8, 150, 250)
         bot = DiscordAIBot(settings, Database(Path("/tmp/unused-test.db")), "0002")
         for ext in EXTENSIONS:
             await bot.load_extension(ext)

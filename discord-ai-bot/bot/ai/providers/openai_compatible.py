@@ -48,10 +48,17 @@ class OpenAICompatibleProvider:
         return data.get("data", []) if isinstance(data, dict) else []
 
     async def resolve_model(self) -> str:
-        """Turns GROQ_MODEL=auto into a real model ID that exists right now."""
+        """Turns MODEL=auto into a real model ID that exists right now (for Ollama: one you've downloaded)."""
         if self.cfg.model != "auto":
             return self.model
         available = [m.get("id", "") for m in await self.list_models()]
+        if self.name == "ollama":
+            chat = [m for m in available if m and not _NOT_CHAT.search(m)]
+            if not chat:
+                raise ProviderUnavailable("ollama has no models downloaded yet (run: ollama pull <model>)")
+            self.model = chat[0]
+            log.info("ollama: using downloaded model %s", self.model)
+            return self.model
         for wanted in GROQ_PREFERENCE:
             if wanted in available:
                 self.model = wanted

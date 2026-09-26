@@ -79,6 +79,18 @@ async def store_message(s: AsyncSession, m: discord.Message) -> None:
     )
 
 
+async def store_messages_bulk(s: AsyncSession, messages: list[discord.Message]) -> None:
+    """Fast path for history scans: one INSERT for a whole page. Existing rows are left alone."""
+    if not messages:
+        return
+    rows = [dict(
+        id=m.id, guild_id=m.guild.id, channel_id=m.channel.id, author_id=m.author.id, content=m.content or "",
+        reply_to_id=m.reference.message_id if m.reference else None, attachment_count=len(m.attachments),
+        created_at=m.created_at, edited_at=m.edited_at,
+    ) for m in messages]
+    await s.execute(insert(Message).values(rows).on_conflict_do_nothing())
+
+
 async def update_message_content(s: AsyncSession, message_id: int, content: str) -> None:
     await s.execute(update(Message).where(Message.id == message_id).values(content=content, edited_at=utcnow()))
 

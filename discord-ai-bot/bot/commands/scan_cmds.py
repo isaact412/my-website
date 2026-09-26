@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.commands.admin import is_admin
-from bot.memory.scanner import DIGEST_CHUNK, PAGE, PAUSE_BETWEEN_PAGES, estimate_channel
+from bot.memory.scanner import MAX_CHUNK, PAGE, PARALLEL_CHANNELS, estimate_channel
 
 log = logging.getLogger("bot.scan")
 
@@ -56,16 +56,20 @@ class ScanCommands(commands.Cog):
     def plan_text(self, view: ScanSetup) -> str:
         chosen = [view.estimates[cid] for cid in view.selected]
         total = sum(est for _, est in chosen)
-        minutes = max(1, round(total / PAGE * (PAUSE_BETWEEN_PAGES + 0.4) / 60))
-        ai_calls = round(total / DIGEST_CHUNK * 0.6)  # boring chunks are skipped for free
+        biggest = max((est for _, est in chosen), default=0)
+        # Channels are read in parallel, so the biggest channel sets the pace (~0.4s per 100 messages).
+        minutes = max(1, round(max(biggest, total / PARALLEL_CHANNELS) / PAGE * 0.4 / 60))
+        ai_calls = round(total / MAX_CHUNK * 0.5)  # boring conversations are skipped for free
         per_day = self.bot.settings.history_daily_call_limit
+        local = bool(self.bot.worker_router)
         days = max(1, -(-ai_calls // per_day)) if ai_calls else 0
         lines = [
             "**here's what `/scanserver` will do:**",
             f"1. read **~{total:,} messages** from {len(chosen)} channel(s) and save them on the bot's computer "
             f"(free, about **{minutes} min**). bots, excluded channels and opted-out people are skipped.",
-            f"2. slowly turn that history into memories and lore using the free AI "
-            f"(~{ai_calls:,} calls, up to {per_day}/day, so about **{days} day(s)**). costs $0.",
+            f"2. turn that history into memories and lore, **best conversations first** (~{ai_calls:,} AI calls). "
+            + ("uses your computer's local AI with no daily limit, plus the cloud's free quota. costs $0."
+               if local else f"free cloud AI only: up to {per_day}/day, so about **{days} day(s)**. costs $0."),
             "it can be paused, resumed or stopped anytime, and picks up where it left off after a restart.",
             "",
             "**channels** (estimates are rough):",
