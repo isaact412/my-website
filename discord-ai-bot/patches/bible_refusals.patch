@@ -1,0 +1,78 @@
+diff --git a/bot/memory/bible.py b/bot/memory/bible.py
+index 618bb39..4dd8996 100644
+--- a/bot/memory/bible.py
++++ b/bot/memory/bible.py
+@@ -23,10 +23,30 @@ from bot.ai.router import AllProvidersUnavailable
+ from bot.database.models import Message
+ from bot.memory import store
+ from bot.memory.recall import STOPWORDS
++from bot.memory.sensitive import is_sensitive
+ from bot.memory.strength import strength
+ 
+ log = logging.getLogger("bot.memory")
+ 
++# Local models refuse to write about someone when the notes are crude/sexual/personal.
++# Those notes are left out of the bible, and a refusal is never saved as a character sheet.
++_TRIGGERS = re.compile(
++    r"\b(sex\w*|porn\w*|nude\w*|naked|horny|jerk\w* off|masturbat\w*|dick|cock|pussy|boob\w*|tits|cum|fetish\w*|"
++    r"kink\w*|lube|condom\w*|virgin\w*|hook(ed)? up|dating|crush|rape\w*|molest\w*|slur\w*|n[i1]gg\w*|f[a4]gg?\w*|"
++    r"retard\w*|kill (him|her|them|myself|yourself)|suicid\w*)\b", re.I)
++_REFUSAL = re.compile(
++    r"^\W*(i\s*(can'?t|cannot|won'?t|am unable|'m unable|'m not able|am not able)|sorry|i apologi[sz]e|"
++    r"as an ai|unfortunately)|i can'?t (help|assist|create|write|provide)|not able to (help|assist|create)", re.I)
++
++
++def clean_for_bible(text: str) -> bool:
++    return not is_sensitive(text) and not _TRIGGERS.search(text)
++
++
++def is_refusal(answer: str) -> bool:
++    return len(answer.split()) < 8 or bool(_REFUSAL.search(answer))
++
++
+ REBUILD_SECONDS = 12 * 3600
+ MAX_MEMBERS = 25          # character sheets for the most-remembered regulars
+ MIN_MEMORIES = 3
+@@ -155,15 +175,27 @@ class ServerBible:
+ 
+         sheets = {}
+         for uid in regulars:
+-            notes = sorted(by_person[uid], key=strength, reverse=True)[:25]
++            clean = [m for m in sorted(by_person[uid], key=strength, reverse=True) if clean_for_bible(m.text)]
+             msg_count = top_talkers.get(uid, 0)
+-            text = "\n".join(f"- {sanitize(m.text)}" for m in notes)
+-            answer = await self._ask(router, SHEET_PROMPT, f"person: {name(uid)} ({msg_count:,} messages)\nnotes:\n{text}")
++            answer = ""
++            for limit in (25, 10):  # if the model refuses, retry with only the strongest clean notes
++                if not clean:
++                    break
++                text = "\n".join(f"- {sanitize(m.text)}" for m in clean[:limit])
++                answer = await self._ask(router, SHEET_PROMPT, f"person: {name(uid)} ({msg_count:,} messages)\nnotes:\n{text}")
++                if answer and not is_refusal(answer):
++                    break
++                log.info("[BIBLE] model declined the sheet for %s (%r); retrying with fewer notes", name(uid), answer[:40])
++                answer = ""
+             if answer:
+                 sheets[str(uid)] = f"{name(uid)}: " + " / ".join(l.strip("-• ").strip() for l in answer.splitlines() if l.strip())[:700]
++            else:
++                log.info("[BIBLE] skipped the character sheet for %s", name(uid))
+ 
+-        lore = sorted((m for m in memories if m.kind == "lore"), key=strength, reverse=True)[:40]
+-        rel = sorted((m for m in memories if m.kind == "relationship"), key=strength, reverse=True)[:15]
++        lore = sorted((m for m in memories if m.kind == "lore" and clean_for_bible(f"{m.title} {m.text}")),
++                      key=strength, reverse=True)[:40]
++        rel = sorted((m for m in memories if m.kind == "relationship" and clean_for_bible(m.text)),
++                     key=strength, reverse=True)[:15]
+         notes = ("legendary lore:\n" + "\n".join(f"- {sanitize((m.title + ': ') if m.title else '')}{sanitize(m.text)}" for m in lore)
+                  + "\n\nwho's tight with who:\n" + "\n".join(f"- {sanitize(m.text)}" for m in rel)
+                  + "\n\nphrases this server keeps saying:\n" + "\n".join(f"- {p}" for p in phrases)
+@@ -171,6 +203,9 @@ class ServerBible:
+                  + "\n\nwho's who (real name = discord names): " + "; ".join(self.bot.responder.nicknames.whos_who()
+                                                                              if hasattr(self.bot, "responder") else []))
+         overview = await self._ask(router, OVERVIEW_PROMPT, notes, max_tokens=700)
++        if overview and is_refusal(overview):
++            log.info("[BIBLE] model declined the overview; it'll retry on the next rebuild")
++            overview = ""
+ 
+         bible = {"built_at": time.time(), "overview": (overview or "")[:2200], "members": sheets, "phrases": phrases}
+         self.data_dir.mkdir(parents=True, exist_ok=True)

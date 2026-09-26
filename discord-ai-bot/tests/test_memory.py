@@ -321,3 +321,44 @@ def test_server_knowledge_sits_right_before_the_new_message():
                           {"whos_who": ["dale = watson"], "people": ["dale: always late"]})[1].content
     assert body.index("</chat_log>") < body.index("who's who") < body.index("<memory>") < body.index("<new_message")
     assert body.rstrip().endswith("not like an ai.")
+
+
+def test_bible_refusal_detection_and_note_cleaning():
+    from bot.memory.bible import clean_for_bible, is_refusal
+    assert is_refusal("I can't help with that.") and is_refusal("I cannot create content about") and is_refusal("Sorry")
+    assert is_refusal("ok")  # too short to be a real sheet
+    assert not is_refusal("the minecraft server necromancer, blames java for every crash, always with ben")
+    assert not clean_for_bible("dale jerked off to pictures of them") and not clean_for_bible("his crush on sarah")
+    assert clean_for_bible("dale picks the worst madden team every week")
+
+
+@pytest.mark.asyncio
+async def test_bible_retries_after_refusal_and_never_saves_it(env, tmp_path):
+    import asyncio as aio
+    from bot.memory.bible import ServerBible
+    db, privacy = env
+    ex, _ = extractor_for(db, privacy, [answer(
+        {"kind": "member", "about": ["ben"], "text": "keeps starting minecraft servers that die", "evidence": [0]},
+        {"kind": "member", "about": ["ben"], "text": "blames valorant lag for every loss", "evidence": [0]},
+        {"kind": "member", "about": ["ben"], "text": "says persona is overrated to start fights", "evidence": [3]},
+        {"kind": "member", "about": ["alex"], "text": "costco chicken guy", "evidence": [4]},
+        {"kind": "member", "about": ["alex"], "text": "valorant carry", "evidence": [4]},
+        {"kind": "member", "about": ["alex"], "text": "persona sweat", "evidence": [4]},
+    )])
+    await ex.run_channel(10)
+    # ben: refused twice → skipped. alex: refused once, then a real sheet. then the overview.
+    router = FakeRouter(["I can't help with that.", "Sorry", "I cannot do that", "- costco chicken guy who carries in valorant and sweats persona",
+                         "a server about dying minecraft servers, costco and valorant"])
+    members = {uid: SimpleNamespace(display_name=n) for uid, n in NAMES.items()}
+    guild = SimpleNamespace(id=1, name="test", get_member=members.get, default_role=object(),
+                            text_channels=[SimpleNamespace(id=10, permissions_for=lambda role: SimpleNamespace(read_message_history=True))])
+    bible = ServerBible(SimpleNamespace(get_guild=lambda gid: guild, db=db, extractor=SimpleNamespace(router=router)), tmp_path)
+    bible.get(1)
+    for _ in range(60):
+        await aio.sleep(0.05)
+        if bible._cache.get(1, {}).get("built_at"):
+            break
+    sheets = bible._cache[1]["members"]
+    assert all("can't" not in s and "Sorry" not in s for s in sheets.values())
+    assert list(sheets.values()) == ["alex: costco chicken guy who carries in valorant and sweats persona"]
+    assert bible._cache[1]["overview"].startswith("a server about")
