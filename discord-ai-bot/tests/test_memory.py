@@ -362,3 +362,14 @@ async def test_bible_retries_after_refusal_and_never_saves_it(env, tmp_path):
     assert all("can't" not in s and "Sorry" not in s for s in sheets.values())
     assert list(sheets.values()) == ["alex: costco chicken guy who carries in valorant and sweats persona"]
     assert bible._cache[1]["overview"].startswith("a server about")
+
+
+def test_bible_reads_json_or_plain_answers():
+    from bot.memory.bible import is_refusal, read_answer
+    assert read_answer('{"lines": ["the minecraft necromancer", "blames java"]}', "lines") == "the minecraft necromancer\nblames java"
+    assert read_answer('```json\n{"overview": "a server about costco"}\n```', "overview") == "a server about costco"
+    assert read_answer('{"sheet": ["uses a different key"]}', "lines") == "uses a different key"
+    assert read_answer("- plain text line\n- another", "lines") == "- plain text line\n- another"
+    # the garbage forced-JSON mode produced before: must count as a failure, not a sheet
+    assert is_refusal(read_answer('{  }', "lines"))
+    assert is_refusal(read_answer('{"massage fucking watson":"n9"}', "lines"))

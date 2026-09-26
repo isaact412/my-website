@@ -1,0 +1,71 @@
+diff --git a/bot/memory/bible.py b/bot/memory/bible.py
+index 4dd8996..fc6af29 100644
+--- a/bot/memory/bible.py
++++ b/bot/memory/bible.py
+@@ -39,6 +39,30 @@ _REFUSAL = re.compile(
+     r"as an ai|unfortunately)|i can'?t (help|assist|create|write|provide)|not able to (help|assist|create)", re.I)
+ 
+ 
++def read_answer(raw: str, key: str) -> str:
++    """Gets the text out of the model's answer, whether it replied in JSON (as asked) or plain text.
++
++    Some setups force Ollama to always answer in JSON, so the bible asks for JSON on purpose.
++    """
++    raw = (raw or "").strip()
++    start, end = raw.find("{"), raw.rfind("}")
++    if start != -1 and end > start:
++        try:
++            data = json.loads(raw[start:end + 1])
++        except ValueError:
++            data = None
++        if isinstance(data, dict):
++            value = data.get(key)
++            if value is None and len(data) == 1:
++                value = next(iter(data.values()))  # model used a different key name
++            if isinstance(value, list):
++                return "\n".join(str(v).strip() for v in value if str(v).strip())
++            if isinstance(value, str):
++                return value.strip()
++            return ""
++    return raw
++
++
+ def clean_for_bible(text: str) -> bool:
+     return not is_sensitive(text) and not _TRIGGERS.search(text)
+ 
+@@ -58,12 +82,14 @@ GUARDRAILS = ("focus on bits, habits, humor, games, music, running jokes and how
+ SHEET_PROMPT = """you write short "character sheets" for a discord bot so it understands the people in a friend server.
+ write 4-6 short lines, in lowercase group-chat voice, about this person: what they're known for, their running bits,
+ how they talk (phrases, style), who they're always with, and the best material to tease them with.
+-only use what's in the notes. no intro, no headings, just the lines. """ + GUARDRAILS
++only use what's in the notes. """ + GUARDRAILS + """
++reply with ONLY this json: {"lines": ["first line", "second line", ...]}"""
+ 
+ OVERVIEW_PROMPT = """you write the "server bible" for a discord bot so it understands a friend server's culture.
+ from the notes, write max 250 words in lowercase group-chat voice covering: what this server is about, the biggest
+ running jokes and legendary incidents (with the names involved), what the recurring phrases mean, who's tight with who,
+-and the general vibe/humor. be specific, use names. no headings, no intro. """ + GUARDRAILS
++and the general vibe/humor. be specific, use names. """ + GUARDRAILS + """
++reply with ONLY this json: {"overview": "the whole text as one string"}"""
+ 
+ 
+ def _grams(content: str):
+@@ -182,7 +208,8 @@ class ServerBible:
+                 if not clean:
+                     break
+                 text = "\n".join(f"- {sanitize(m.text)}" for m in clean[:limit])
+-                answer = await self._ask(router, SHEET_PROMPT, f"person: {name(uid)} ({msg_count:,} messages)\nnotes:\n{text}")
++                answer = read_answer(await self._ask(
++                    router, SHEET_PROMPT, f"person: {name(uid)} ({msg_count:,} messages)\nnotes:\n{text}"), "lines")
+                 if answer and not is_refusal(answer):
+                     break
+                 log.info("[BIBLE] model declined the sheet for %s (%r); retrying with fewer notes", name(uid), answer[:40])
+@@ -202,7 +229,7 @@ class ServerBible:
+                  + "\n\nmost active: " + ", ".join(f"{name(u)} ({c:,})" for u, c in list(top_talkers.items())[:12])
+                  + "\n\nwho's who (real name = discord names): " + "; ".join(self.bot.responder.nicknames.whos_who()
+                                                                              if hasattr(self.bot, "responder") else []))
+-        overview = await self._ask(router, OVERVIEW_PROMPT, notes, max_tokens=700)
++        overview = read_answer(await self._ask(router, OVERVIEW_PROMPT, notes, max_tokens=900), "overview")
+         if overview and is_refusal(overview):
+             log.info("[BIBLE] model declined the overview; it'll retry on the next rebuild")
+             overview = ""
