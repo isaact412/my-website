@@ -115,3 +115,13 @@ async def test_responder_handles_skip_and_react(monkeypatch):
     await r.send(m, "[react:💀]", spontaneous=True)
     await r.send(m, "bro what [react:💀]", spontaneous=False)
     assert m.reactions == ["💀"] and sent == [("reply", "bro what")]
+
+
+def test_bot_does_not_copy_its_own_old_replies():
+    from bot.services.responder import drop_own_old_lines
+    history = [("you", "old bland 1"), ("dale", "bro the snacks"), ("you", "old bland 2"),
+               ("isaac", "fuck"), ("you", "old bland 3"), ("dale", "snack anxiety??"), ("you", "latest")]
+    out = drop_own_old_lines(history)
+    assert [t for n, t in out if n == "you"] == ["old bland 3", "latest"]
+    assert [t for n, t in out if n != "you"] == ["bro the snacks", "fuck", "snack anxiety??"]
+    assert drop_own_old_lines([("dale", "hi")]) == [("dale", "hi")]

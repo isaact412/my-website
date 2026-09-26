@@ -176,6 +176,7 @@ class Responder:
                 if m.clean_content:
                     history.append((name, m.clean_content))
             history.reverse()
+            history = drop_own_old_lines(history)
         except (discord.Forbidden, discord.HTTPException):
             log.info("No history access in #%s; replying without context", getattr(message.channel, "name", "?"))
 
@@ -212,6 +213,20 @@ class Responder:
                                         provider=provider, model=model, kind="reply", **counts)
         except Exception:
             log.exception("Could not record usage")
+
+
+KEEP_OWN_LINES = 2  # only the bot's most recent lines stay in context
+
+
+def drop_own_old_lines(history: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Removes all but the bot's last couple of messages from the chat log.
+
+    Otherwise the AI reads a wall of its own old replies and copies that voice instead of the server's,
+    which keeps it generic. Replies to the bot still work: the message being replied to is passed separately.
+    """
+    own = [i for i, (name, _) in enumerate(history) if name == "you"]
+    drop = set(own[:-KEEP_OWN_LINES]) if len(own) > KEEP_OWN_LINES else set()
+    return [line for i, line in enumerate(history) if i not in drop]
 
 
 async def _safe_react(message: discord.Message, emoji: str) -> None:
