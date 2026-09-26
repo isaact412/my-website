@@ -34,6 +34,7 @@ class Settings:
     background_daily_call_limit: int
     history_daily_call_limit: int
     background_parallel: int  # simultaneous requests to the background AI (e.g. Ollama)
+    history_use_reply_ai: bool  # let /scanserver also use the reply AI when a local AI exists
 
 
 def _get(name: str, default: str = "") -> str:
@@ -127,6 +128,7 @@ def load_settings() -> Settings:
         background_daily_call_limit=_int("BACKGROUND_DAILY_CALL_LIMIT", 150),
         history_daily_call_limit=_int("HISTORY_DAILY_CALL_LIMIT", 250),
         background_parallel=max(1, min(4, _int("BACKGROUND_PARALLEL", 2))),
+        history_use_reply_ai=_bool("HISTORY_USE_REPLY_AI", False),
     )
 
 

@@ -141,3 +141,13 @@ def matches_keywords(m: Memory, words: set[str]) -> float:
 def search_filter(term: str):
     like = f"%{term.lower()}%"
     return or_(func.lower(Memory.text).like(like), func.lower(Memory.title).like(like), func.lower(Memory.keywords).like(like))
+
+
+async def purge_sensitive(s: AsyncSession) -> int:
+    """Deletes any saved memory that the (current) sensitive filter would block. Runs at startup."""
+    from bot.memory.sensitive import is_sensitive
+    rows = list(await s.execute(select(Memory.id, Memory.title, Memory.text)))
+    bad = [mid for mid, title, text in rows if is_sensitive(f"{title} {text}")]
+    for mid in bad:
+        await delete_memory(s, mid)
+    return len(bad)

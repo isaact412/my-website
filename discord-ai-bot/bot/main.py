@@ -15,6 +15,7 @@ from bot.database.engine import Database
 from bot.database.migrate import upgrade_to_latest
 from bot.indexing.ingest import Ingestor
 from bot.logging_setup import setup_logging
+from bot.memory import store as memory_store
 from bot.memory.embeddings import Embedder
 from bot.memory.extractor import MemoryExtractor
 from bot.memory.scanner import Lane, Scanner
@@ -71,8 +72,11 @@ class DiscordAIBot(commands.Bot):
         self.extractor = MemoryExtractor(self, db, self.worker_router or self.router, self.embedder, self.privacy,
                                          self.background_budget, fallback_router=self.router if self.worker_router else None)
         self.ingestor.on_stored = self.extractor.note
-        lanes = [Lane("reply AI (" + ", ".join(p.name for p in settings.providers) + ")", self.router,
-                      Budget(4, settings.history_daily_call_limit, 0))]
+        lanes = []
+        if not self.worker_router or settings.history_use_reply_ai:
+            # Without a local AI, the scan has to share the reply AI's free quota (capped per day).
+            lanes.append(Lane("reply AI (" + ", ".join(p.name for p in settings.providers) + ")", self.router,
+                              Budget(2, settings.history_daily_call_limit, 0)))
         if self.worker_router:
             # Local/background AI: no daily cap of ours; its own rate limits still apply.
             lanes.insert(0, Lane("background AI (" + ", ".join(p.name for p in settings.worker_providers) + ")",
@@ -82,6 +86,10 @@ class DiscordAIBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.privacy.load()
+        async with self.db.session() as s:
+            purged = await memory_store.purge_sensitive(s)
+        if purged:
+            log.info("[MEMORY] deleted %d saved memories that the privacy filter now blocks", purged)
         await self.router.start()
         if self.worker_router:
             await self.worker_router.start()
