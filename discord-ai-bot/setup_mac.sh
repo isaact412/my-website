@@ -27,6 +27,8 @@ OLLAMA_MODEL=auto
 # Optional: a separate free provider chain for background memory/lore work (e.g. ollama),
 # so it doesn't use up the reply provider's daily quota. Empty = same as AI_PROVIDER_CHAIN.
 WORKER_PROVIDER_CHAIN=
+# How many background AI requests run at once (2 is a good fit for Ollama on an M-series Mac)
+BACKGROUND_PARALLEL=2
 
 # --- Safety limits (kept below the free tiers' own limits) ---
 AI_MAX_CALLS_PER_MINUTE=20
@@ -1303,6 +1305,7 @@ class Settings:
     ai_user_cooldown_seconds: int
     background_daily_call_limit: int
     history_daily_call_limit: int
+    background_parallel: int  # simultaneous requests to the background AI (e.g. Ollama)
 
 
 def _get(name: str, default: str = "") -> str:
@@ -1395,6 +1398,7 @@ def load_settings() -> Settings:
         ai_user_cooldown_seconds=_int("AI_USER_COOLDOWN_SECONDS", 8),
         background_daily_call_limit=_int("BACKGROUND_DAILY_CALL_LIMIT", 150),
         history_daily_call_limit=_int("HISTORY_DAILY_CALL_LIMIT", 250),
+        background_parallel=max(1, min(4, _int("BACKGROUND_PARALLEL", 2))),
     )
 
 
@@ -2254,7 +2258,7 @@ class DiscordAIBot(commands.Bot):
         if self.worker_router:
             # Local/background AI: no daily cap of ours; its own rate limits still apply.
             lanes.insert(0, Lane("background AI (" + ", ".join(p.name for p in settings.worker_providers) + ")",
-                                 self.worker_router, Budget(60, 1_000_000, 0)))
+                                 self.worker_router, Budget(60, 1_000_000, 0), workers=settings.background_parallel))
         self.scanner = Scanner(self, db, lanes)
         self.responder = Responder(self, self.router, self.budget, db, self.personality, self.embedder, self.privacy)
 
@@ -2775,6 +2779,7 @@ class Lane:
     name: str
     router: AIRouter
     budget: Budget
+    workers: int = 1  # how many requests this lane sends at the same time
 
 
 async def estimate_channel(channel: discord.TextChannel) -> int:
@@ -3054,10 +3059,12 @@ class Scanner:
         queue: asyncio.Queue = asyncio.Queue()
         for row in todo:
             queue.put_nowait(tuple(row))
-        await asyncio.gather(*(self._lane_worker(job, lane, queue) for lane in self.lanes))
+        await asyncio.gather(*(self._lane_worker(job, lane, queue, n)
+                               for lane in self.lanes for n in range(lane.workers)))
 
-    async def _lane_worker(self, job: ScanJob, lane: Lane, queue: asyncio.Queue) -> None:
+    async def _lane_worker(self, job: ScanJob, lane: Lane, queue: asyncio.Queue, worker_no: int = 0) -> None:
         notes = self._notes.setdefault(job.guild_id, {})
+        await asyncio.sleep(worker_no * 2)  # stagger start so workers don't collide on the first chunk
         cutoff = self._cutoff(job)
         while not queue.empty():
             while (reason := lane.budget.blocked_reason(None)):
@@ -3966,7 +3973,7 @@ from bot.config import ProviderConfig, Settings
 
 def make_settings(providers, allow_paid=False):
     from pathlib import Path
-    return Settings("t", 1, None, "INFO", Path("x.db"), allow_paid, providers, [], 20, 800, 8, 150, 250)
+    return Settings("t", 1, None, "INFO", Path("x.db"), allow_paid, providers, [], 20, 800, 8, 150, 250, 2)
 
 
 async def fake_server(behaviour):
@@ -4351,7 +4358,7 @@ async def test_scan_resumes_after_crash_and_digests_best_first(env, monkeypatch)
         m.id = msgs[249].id + 1000 + i
     channel = FakeChannel(msgs, fail_after=150)
     bot, guild, calls = fake_bot(db, channel, [])
-    scanner = Scanner(bot, db, [Lane("local", "ollama-router", Budget(100, 1000, 0)),
+    scanner = Scanner(bot, db, [Lane("local", "ollama-router", Budget(100, 1000, 0), workers=2),
                                 Lane("cloud", "groq-router", Budget(100, 1, 0))])
 
     job_id = await scanner.create_job(guild, [(channel, 300)], 99, None)
@@ -4499,7 +4506,7 @@ def test_slash_commands_are_valid():
     from bot.main import EXTENSIONS, DiscordAIBot
 
     async def load():
-        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], [], 20, 800, 8, 150, 250)
+        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], [], 20, 800, 8, 150, 250, 2)
         bot = DiscordAIBot(settings, Database(Path("/tmp/unused-test.db")), "0002")
         for ext in EXTENSIONS:
             await bot.load_extension(ext)
@@ -4543,6 +4550,7 @@ add_default BACKGROUND_DAILY_CALL_LIMIT 150
 add_default HISTORY_DAILY_CALL_LIMIT 250
 add_default OLLAMA_MODEL auto
 add_default WORKER_PROVIDER_CHAIN ollama
+add_default BACKGROUND_PARALLEL 2
 if ! grep -qE '^DISCORD_TOKEN=.+' .env; then echo "⚠️  DISCORD_TOKEN missing in .env"; fi
 if ! grep -qE '^GROQ_API_KEY=.+' .env; then echo "⚠️  GROQ_API_KEY missing in .env"; fi
 echo "✅ files updated, secrets kept"
@@ -4565,6 +4573,7 @@ add_default BACKGROUND_DAILY_CALL_LIMIT 150
 add_default HISTORY_DAILY_CALL_LIMIT 250
 add_default OLLAMA_MODEL auto
 add_default WORKER_PROVIDER_CHAIN ollama
+add_default BACKGROUND_PARALLEL 2
 if ! grep -qE '^DISCORD_TOKEN=.+' .env; then echo "⚠️  DISCORD_TOKEN missing in .env"; fi
 if ! grep -qE '^GROQ_API_KEY=.+' .env; then echo "⚠️  GROQ_API_KEY missing in .env"; fi
 echo "✅ files updated, secrets kept"

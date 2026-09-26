@@ -89,7 +89,7 @@ def test_slash_commands_are_valid():
     from bot.main import EXTENSIONS, DiscordAIBot
 
     async def load():
-        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], [], 20, 800, 8, 150, 250)
+        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], [], 20, 800, 8, 150, 250, 2)
         bot = DiscordAIBot(settings, Database(Path("/tmp/unused-test.db")), "0002")
         for ext in EXTENSIONS:
             await bot.load_extension(ext)

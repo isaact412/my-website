@@ -86,7 +86,7 @@ async def test_scan_resumes_after_crash_and_digests_best_first(env, monkeypatch)
         m.id = msgs[249].id + 1000 + i
     channel = FakeChannel(msgs, fail_after=150)
     bot, guild, calls = fake_bot(db, channel, [])
-    scanner = Scanner(bot, db, [Lane("local", "ollama-router", Budget(100, 1000, 0)),
+    scanner = Scanner(bot, db, [Lane("local", "ollama-router", Budget(100, 1000, 0), workers=2),
                                 Lane("cloud", "groq-router", Budget(100, 1, 0))])
 
     job_id = await scanner.create_job(guild, [(channel, 300)], 99, None)

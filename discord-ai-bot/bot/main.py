@@ -70,7 +70,7 @@ class DiscordAIBot(commands.Bot):
         if self.worker_router:
             # Local/background AI: no daily cap of ours; its own rate limits still apply.
             lanes.insert(0, Lane("background AI (" + ", ".join(p.name for p in settings.worker_providers) + ")",
-                                 self.worker_router, Budget(60, 1_000_000, 0)))
+                                 self.worker_router, Budget(60, 1_000_000, 0), workers=settings.background_parallel))
         self.scanner = Scanner(self, db, lanes)
         self.responder = Responder(self, self.router, self.budget, db, self.personality, self.embedder, self.privacy)
 

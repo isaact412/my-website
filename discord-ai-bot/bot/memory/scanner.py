@@ -49,6 +49,7 @@ class Lane:
     name: str
     router: AIRouter
     budget: Budget
+    workers: int = 1  # how many requests this lane sends at the same time
 
 
 async def estimate_channel(channel: discord.TextChannel) -> int:
@@ -328,10 +329,12 @@ class Scanner:
         queue: asyncio.Queue = asyncio.Queue()
         for row in todo:
             queue.put_nowait(tuple(row))
-        await asyncio.gather(*(self._lane_worker(job, lane, queue) for lane in self.lanes))
+        await asyncio.gather(*(self._lane_worker(job, lane, queue, n)
+                               for lane in self.lanes for n in range(lane.workers)))
 
-    async def _lane_worker(self, job: ScanJob, lane: Lane, queue: asyncio.Queue) -> None:
+    async def _lane_worker(self, job: ScanJob, lane: Lane, queue: asyncio.Queue, worker_no: int = 0) -> None:
         notes = self._notes.setdefault(job.guild_id, {})
+        await asyncio.sleep(worker_no * 2)  # stagger start so workers don't collide on the first chunk
         cutoff = self._cutoff(job)
         while not queue.empty():
             while (reason := lane.budget.blocked_reason(None)):

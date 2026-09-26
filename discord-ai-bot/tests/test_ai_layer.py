@@ -14,7 +14,7 @@ from bot.config import ProviderConfig, Settings
 
 def make_settings(providers, allow_paid=False):
     from pathlib import Path
-    return Settings("t", 1, None, "INFO", Path("x.db"), allow_paid, providers, [], 20, 800, 8, 150, 250)
+    return Settings("t", 1, None, "INFO", Path("x.db"), allow_paid, providers, [], 20, 800, 8, 150, 250, 2)
 
 
 async def fake_server(behaviour):

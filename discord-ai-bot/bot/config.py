@@ -33,6 +33,7 @@ class Settings:
     ai_user_cooldown_seconds: int
     background_daily_call_limit: int
     history_daily_call_limit: int
+    background_parallel: int  # simultaneous requests to the background AI (e.g. Ollama)
 
 
 def _get(name: str, default: str = "") -> str:
@@ -125,6 +126,7 @@ def load_settings() -> Settings:
         ai_user_cooldown_seconds=_int("AI_USER_COOLDOWN_SECONDS", 8),
         background_daily_call_limit=_int("BACKGROUND_DAILY_CALL_LIMIT", 150),
         history_daily_call_limit=_int("HISTORY_DAILY_CALL_LIMIT", 250),
+        background_parallel=max(1, min(4, _int("BACKGROUND_PARALLEL", 2))),
     )
 
 
