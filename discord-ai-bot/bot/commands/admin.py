@@ -6,6 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import repo
+from bot.memory import store
 from bot.utils.confirm import ask
 
 log = logging.getLogger("bot.commands")
@@ -63,6 +64,7 @@ class Admin(commands.Cog):
         async with self.bot.db.session() as s:
             await repo.set_channel_excluded(s, interaction.guild_id, channel.id, True)
             deleted = await repo.delete_channel_messages(s, channel.id)
+            await store.forget_channel_memories(s, interaction.guild_id, channel.id)
         self.bot.privacy.excluded_channels.add(channel.id)
         log.info("Excluded channel %s in guild %s (%d stored messages deleted)", channel.id, interaction.guild_id, deleted)
         await interaction.response.send_message(
@@ -84,14 +86,15 @@ class Admin(commands.Cog):
     @app_commands.guild_only()
     @is_admin()
     async def clearmemory(self, interaction: discord.Interaction) -> None:
-        if not await ask(interaction, "this deletes ALL stored messages and nicknames for this server. settings and "
+        if not await ask(interaction, "this deletes ALL stored messages, memories, lore and nicknames for this server. settings and "
                                       "opt-outs are kept. can't be undone. sure?", "delete server memory"):
             return
         async with self.bot.db.session() as s:
             deleted = await repo.clear_guild_memory(s, interaction.guild_id)
+            memories = await store.clear_guild(s, interaction.guild_id)
         self.bot.ingestor.forget_cached_names(interaction.guild_id)
         log.info("Cleared memory for guild %s (%d messages) by %s", interaction.guild_id, deleted, interaction.user.id)
-        await interaction.edit_original_response(content=f"done. deleted {deleted:,} stored messages. fresh start.")
+        await interaction.edit_original_response(content=f"done. deleted {deleted:,} stored messages and {memories} memories. fresh start.")
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         if isinstance(error, app_commands.CheckFailure):

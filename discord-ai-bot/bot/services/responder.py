@@ -10,6 +10,10 @@ from bot.ai.router import AIRouter, AllProvidersUnavailable
 from bot.character.personality import Personality
 from bot.database import repo
 from bot.database.engine import Database
+from bot.memory import store
+from bot.memory.embeddings import Embedder
+from bot.memory.retrieval import relevant_memories
+from bot.services.privacy import PrivacyState
 
 log = logging.getLogger("bot.ai")
 
@@ -18,12 +22,15 @@ OFFLINE_NOTICE_EVERY = 300  # seconds; don't spam "brain offline" messages
 
 
 class Responder:
-    def __init__(self, bot: discord.Client, router: AIRouter, budget: Budget, db: Database, personality: Personality):
+    def __init__(self, bot: discord.Client, router: AIRouter, budget: Budget, db: Database, personality: Personality,
+                 embedder: Embedder, privacy: PrivacyState):
         self.bot = bot
         self.router = router
         self.budget = budget
         self.db = db
         self.personality = personality
+        self.embedder = embedder
+        self.privacy = privacy
         self._last_offline_notice: dict[int, float] = {}
 
     async def reply_to(self, message: discord.Message) -> None:
@@ -33,12 +40,13 @@ class Responder:
             await _safe_react(message, "⏳")
             return
 
-        history, replying_to = await self._context(message)
+        history, replying_to, participants = await self._context(message)
         me = message.guild.me if message.guild else self.bot.user
         bot_name = me.display_name
+        memory_lines = await self._memories(message, history, participants)
         prompt = build_messages(
             self.personality, bot_name, getattr(message.channel, "name", "dm"),
-            history, message.author.display_name, message.clean_content, replying_to,
+            history, message.author.display_name, message.clean_content, replying_to, memory_lines,
         )
 
         self.budget.record(message.author.id)
@@ -63,12 +71,43 @@ class Responder:
         except discord.HTTPException as e:
             log.warning("Could not send reply: %s", e)
 
-    async def _context(self, message: discord.Message) -> tuple[list[tuple[str, str]], tuple[str, str] | None]:
-        """Recent channel messages (oldest first) plus the message being replied to, if any."""
+    async def _memories(self, message: discord.Message, history, participants: list[int]) -> dict[str, list[str]]:
+        """A few relevant memories about the people talking, plus maybe one callback."""
+        try:
+            conversation = " ".join(text for _, text in history[-6:]) + " " + message.clean_content
+            async with self.db.session() as s:
+                found = await relevant_memories(
+                    s, self.embedder, message.guild.id, participants, conversation,
+                    callback_chance=self.personality.level("callbacks") / 10,
+                    opted_out=lambda uid: self.privacy.user_opted_out(message.guild.id, uid),
+                )
+                await store.mark_referenced(s, [m.id for m in found["lore"]])
+        except Exception:
+            log.exception("Memory lookup failed; replying without memory")
+            return {}
+        people = []
+        for m in found["people"]:
+            names = [self._name(message.guild, uid) for uid in store.subject_ids(m)]
+            people.append(f"{' & '.join(names)}: {m.text}")
+        lore = [f"{m.title}: {m.text}" if m.title else m.text for m in found["lore"]]
+        if people or lore:
+            log.info("[MEMORY] using %d people memories, %d lore", len(people), len(lore))
+        return {"people": people, "lore": lore}
+
+    @staticmethod
+    def _name(guild: discord.Guild, user_id: int) -> str:
+        member = guild.get_member(user_id)
+        return member.display_name if member else "someone"
+
+    async def _context(self, message: discord.Message):
+        """Recent channel messages (oldest first), the message being replied to, and who's talking."""
         history: list[tuple[str, str]] = []
+        participants = {message.author.id} | {u.id for u in message.mentions if not u.bot}
         try:
             async for m in message.channel.history(limit=HISTORY_MESSAGES, before=message):
                 name = "you" if m.author.id == self.bot.user.id else m.author.display_name
+                if not m.author.bot:
+                    participants.add(m.author.id)
                 if m.clean_content:
                     history.append((name, m.clean_content))
             history.reverse()
@@ -87,7 +126,7 @@ class Responder:
             if parent is not None:
                 name = "you" if parent.author.id == self.bot.user.id else parent.author.display_name
                 replying_to = (name, parent.clean_content)
-        return history, replying_to
+        return history, replying_to, list(participants)
 
     async def _offline_notice(self, message: discord.Message) -> None:
         now = time.monotonic()

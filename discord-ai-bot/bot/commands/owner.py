@@ -43,6 +43,18 @@ class Owner(commands.Cog):
         ]
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
+    @app_commands.command(name="memorynow", description="(bot owner only) analyze this channel's recent messages for memories now")
+    @is_owner()
+    async def memorynow(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        saved = await self.bot.extractor.run_channel(interaction.channel_id, interaction.guild_id, force=True)
+        embeddings = "on" if self.bot.embedder.available else "off (keyword fallback)"
+        await interaction.followup.send(
+            f"done: {saved} memories saved/reinforced. embeddings: {embeddings}. check `/whatdoyouknow` or `/lore`.",
+            ephemeral=True,
+        )
+
+    @memorynow.error
     @debug.error
     async def debug_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         if isinstance(error, app_commands.CheckFailure):

@@ -15,6 +15,8 @@ from bot.database.engine import Database
 from bot.database.migrate import upgrade_to_latest
 from bot.indexing.ingest import Ingestor
 from bot.logging_setup import setup_logging
+from bot.memory.embeddings import Embedder
+from bot.memory.extractor import MemoryExtractor
 from bot.services.privacy import PrivacyState
 from bot.services.responder import Responder
 
@@ -27,6 +29,7 @@ EXTENSIONS = [
     "bot.commands.admin",
     "bot.commands.privacy",
     "bot.features.search",
+    "bot.commands.memory_cmds",
     "bot.listeners.messages",
 ]
 
@@ -52,11 +55,19 @@ class DiscordAIBot(commands.Bot):
         self.router = AIRouter(settings)
         self.budget = Budget(settings.ai_max_calls_per_minute, settings.ai_daily_call_limit,
                              settings.ai_user_cooldown_seconds)
-        self.responder = Responder(self, self.router, self.budget, db, load_personality())
+        self.personality = load_personality()
+        self.embedder = Embedder(settings.database_path.parent / "models")
+        self.background_budget = Budget(5, settings.background_daily_call_limit, 0)
+        self.extractor = MemoryExtractor(self, db, self.router, self.embedder, self.privacy, self.background_budget)
+        self.ingestor.on_stored = self.extractor.note
+        self.responder = Responder(self, self.router, self.budget, db, self.personality, self.embedder, self.privacy)
 
     async def setup_hook(self) -> None:
         await self.privacy.load()
         await self.router.start()
+        # Loads (and on first run downloads, ~70 MB) the local embedding model without blocking startup.
+        self.loop.create_task(self.embedder.load())
+        self.extractor.start()
 
         for ext in EXTENSIONS:
             await self.load_extension(ext)
@@ -96,6 +107,7 @@ class DiscordAIBot(commands.Bot):
             log.exception("Could not save server %s to the database", guild.id)
 
     async def close(self) -> None:
+        self.extractor.stop()
         await super().close()
         await self.router.close()
         await self.db.close()

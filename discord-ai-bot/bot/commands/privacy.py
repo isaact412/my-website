@@ -6,6 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import repo
+from bot.memory import store
 from bot.utils.confirm import ask
 
 log = logging.getLogger("bot.privacy")
@@ -42,7 +43,8 @@ class Privacy(commands.Cog):
         e.add_field(name="what i store", inline=False, value=(
             "• your messages in those channels (text, time, channel, who you replied to)\n"
             "• the names you go by here (username, display name, nickname), tied to your discord ID\n"
-            "• later: funny non-sensitive stuff like running jokes, quotes, games you talk about\n"
+            "• memories: funny non-sensitive stuff like running jokes, quotes, games you talk about, "
+            "server lore. each one links back to the messages it came from (`/whyremember`)\n"
             "i'm built **not** to store sensitive stuff (health, religion, politics, sexuality, etc).\n"
             "if you delete a message on discord, i delete my copy too."
         ))
@@ -65,13 +67,17 @@ class Privacy(commands.Cog):
     async def whatdoyouknow(self, interaction: discord.Interaction) -> None:
         async with self.bot.db.session() as s:
             info = await repo.what_we_know(s, interaction.guild_id, interaction.user.id)
+            memories = await store.about_user(s, interaction.guild_id, interaction.user.id)
         names = ", ".join(f"{v} ({k.replace('_', ' ')})" for k, v in info["names"]) or "none"
         first = discord.utils.format_dt(info["first_message"], "D") if info["first_message"] else "n/a"
         lines = [
             "**here's everything i have on you in this server:**",
             f"• stored messages: {info['messages']:,} (oldest: {first})",
             f"• names i've seen you use: {names}",
-            "• memories / lore about you: none yet (that feature isn't built yet)",
+            f"• memories about you: {len(memories)}",
+            *[f"  `#{m.id}` {discord.utils.escape_mentions(m.text)}" for m in memories[:10]],
+            *(["  (…and more)"] if len(memories) > 10 else []),
+            "wrong? `/forget <number>` · where'd that come from? `/whyremember <number>`",
             "",
             f"status: {'opted out' if self.bot.privacy.user_opted_out(interaction.guild_id, interaction.user.id) else 'included'}"
             " · `/forgetme` deletes all of it",
@@ -108,11 +114,12 @@ class Privacy(commands.Cog):
             return
         async with self.bot.db.session() as s:
             deleted = await repo.forget_user(s, interaction.guild_id, interaction.user.id)
+            forgotten = await store.forget_user_memories(s, interaction.guild_id, interaction.user.id)
         self.bot.ingestor.forget_cached_names(interaction.guild_id, interaction.user.id)
         log.info("Forgot user %s in guild %s (%d messages)", interaction.user.id, interaction.guild_id, deleted)
         opted = self.bot.privacy.user_opted_out(interaction.guild_id, interaction.user.id)
         await interaction.edit_original_response(content=(
-            f"gone. deleted {deleted:,} messages and your saved names. "
+            f"gone. deleted {deleted:,} messages, {forgotten} memories, and your saved names. "
             + ("you're still opted out, so i won't collect anything new." if opted
                else "i'll start fresh from your next message. use `/optout` if you don't want that.")
         ))

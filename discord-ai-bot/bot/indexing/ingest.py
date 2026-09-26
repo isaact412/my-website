@@ -15,6 +15,7 @@ class Ingestor:
         self.db = db
         self.privacy = privacy
         self._known_names: dict[tuple[int, int], tuple] = {}  # skip name writes when nothing changed
+        self.on_stored = None  # set by main.py: memory extractor hook
 
     def should_store(self, message: discord.Message) -> bool:
         return (
@@ -36,6 +37,8 @@ class Ingestor:
                 if self._known_names.get(key) != names:
                     await repo.upsert_user_names(s, message.author, message.guild.id)
             self._known_names[key] = names
+            if self.on_stored and message.content:
+                self.on_stored(message.guild.id, message.channel.id, message.id)
         except Exception:
             log.exception("Could not store message %s", message.id)
 

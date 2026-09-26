@@ -7,7 +7,7 @@ Changing anything here needs a new migration in migrations/versions/.
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -132,3 +132,45 @@ class Message(Base):
     attachment_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Memory(Base):
+    """Something the bot remembers: a member fact, a piece of server lore, or a relationship.
+
+    Memories strengthen when the same thing keeps coming up (times_reinforced, distinct_days)
+    and fade over time based on their tier. See bot/memory/strength.py.
+    """
+
+    __tablename__ = "memories"
+    __table_args__ = (Index("ix_memories_guild_kind", "guild_id", "kind", "active"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("guilds.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20))  # "member" | "lore" | "relationship"
+    subject_ids: Mapped[str] = mapped_column(String(200), default="")  # space-separated user IDs, e.g. " 123 456 "
+    title: Mapped[str] = mapped_column(String(120), default="")
+    text: Mapped[str] = mapped_column(Text)
+    keywords: Mapped[str] = mapped_column(String(300), default="")
+    importance: Mapped[int] = mapped_column(Integer, default=1)  # 1 minor, 2 notable, 3 legendary
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    times_reinforced: Mapped[int] = mapped_column(Integer, default=1)
+    distinct_days: Mapped[int] = mapped_column(Integer, default=1)
+    last_seen_day: Mapped[str] = mapped_column(String(10), default="")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)  # added on purpose via /remember
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary)  # float16 vector, None if embeddings are off
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_referenced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MemorySource(Base):
+    """Which Discord message(s) a memory came from. Powers /whyremember."""
+
+    __tablename__ = "memory_sources"
+
+    memory_id: Mapped[int] = mapped_column(Integer, ForeignKey("memories.id", ondelete="CASCADE"), primary_key=True)
+    message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    channel_id: Mapped[int] = mapped_column(BigInteger)
+    author_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

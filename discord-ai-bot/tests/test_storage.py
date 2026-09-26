@@ -77,7 +77,7 @@ async def test_upgrade_existing_0001_database(tmp_path: Path):
     path = tmp_path / "bot.db"
     command.upgrade(_alembic_config(path), "0001")
     assert current_revision(path) == "0001"
-    assert upgrade_to_latest(path) == "0002"
+    assert upgrade_to_latest(path) == "0003"
     assert list((tmp_path / "backups").glob("bot-*.db"))
 
 
@@ -88,7 +88,7 @@ def test_slash_commands_are_valid():
     from bot.main import EXTENSIONS, DiscordAIBot
 
     async def load():
-        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], 20, 800, 8)
+        settings = Settings("t", 1, None, "INFO", Path("x.db"), False, [], 20, 800, 8, 150)
         bot = DiscordAIBot(settings, Database(Path("/tmp/unused-test.db")), "0002")
         for ext in EXTENSIONS:
             await bot.load_extension(ext)
@@ -96,7 +96,7 @@ def test_slash_commands_are_valid():
 
     cmds = asyncio.run(load())
     names = sorted(c.name for c in cmds)
-    assert names == sorted(["ping", "debug", "usage", "excludechannel", "includechannel", "clearmemory",
+    assert names == sorted(["ping", "debug", "memorynow", "remember", "lore", "forget", "whyremember", "usage", "excludechannel", "includechannel", "clearmemory",
                             "privacy", "whatdoyouknow", "optout", "optin", "forgetme", "search"])
     for c in cmds:
         assert len(c.description) <= 100 and c.name.islower()

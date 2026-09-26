@@ -30,6 +30,7 @@ class Settings:
     ai_max_calls_per_minute: int
     ai_daily_call_limit: int
     ai_user_cooldown_seconds: int
+    background_daily_call_limit: int
 
 
 def _get(name: str, default: str = "") -> str:
@@ -119,6 +120,7 @@ def load_settings() -> Settings:
         ai_max_calls_per_minute=_int("AI_MAX_CALLS_PER_MINUTE", 20),
         ai_daily_call_limit=_int("AI_DAILY_CALL_LIMIT", 800),
         ai_user_cooldown_seconds=_int("AI_USER_COOLDOWN_SECONDS", 8),
+        background_daily_call_limit=_int("BACKGROUND_DAILY_CALL_LIMIT", 150),
     )
 
 
