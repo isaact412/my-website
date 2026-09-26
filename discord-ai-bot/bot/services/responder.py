@@ -16,13 +16,14 @@ from bot.memory import store
 from bot.memory.embeddings import Embedder
 from bot.memory.recall import recall_messages
 from bot.memory.voice import VoiceSampler
+from bot.memory.bible import ServerBible
 from bot.memory.retrieval import relevant_memories
 from bot.services.privacy import PrivacyState
 
 log = logging.getLogger("bot.ai")
 
-HISTORY_MESSAGES = 40      # recent messages the bot reads before replying
-RECALL_MESSAGES = 8        # old messages pulled back from the full history
+HISTORY_MESSAGES = 30      # recent messages the bot reads before replying
+RECALL_MESSAGES = 6        # old messages pulled back from the full history
 _REACT = re.compile(r"\[react:\s*([^\]]{1,32})\]", re.I)
 OFFLINE_NOTICE_EVERY = 300  # seconds; don't spam "brain offline" messages
 
@@ -39,6 +40,7 @@ class Responder:
         self.privacy = privacy
         self._last_offline_notice: dict[int, float] = {}
         self.voice = VoiceSampler()
+        self.bible = ServerBible(bot, db.path.parent)
 
     async def personality_for(self, guild_id: int) -> Personality:
         cfg = await self.bot.guild_config.get(guild_id)
@@ -139,8 +141,11 @@ class Responder:
         log.info("[MEMORY] context: %d people memories, %d lore, %d background lore, %d recalled messages, "
                  "%d voice samples", len(people), len(lore), len(background), len(recall),
                  len(voice["people"]) + len(voice["hits"]))
+        bible = self.bible.for_reply(message.guild.id, participants)
+        log.info("[BIBLE] %s overview, %d character sheets", "with" if bible["bible_overview"] else "no",
+                 len(bible["bible_people"]))
         return {"people": people, "lore": lore, "background": background, "recall": recall,
-                "voice_people": voice["people"], "voice_hits": voice["hits"]}
+                "voice_people": voice["people"], "voice_hits": voice["hits"], **bible}
 
     @staticmethod
     def _name(guild: discord.Guild, user_id: int) -> str:

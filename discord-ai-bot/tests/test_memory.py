@@ -239,3 +239,43 @@ async def test_voice_samples_real_lines_and_laugh_hits(env):
         __import__("bot.character.personality", fromlist=["load_personality"]).load_personality(),
         "bot", "general", [], "alex", "yo", None, {"voice_people": out["people"], "voice_hits": out["hits"]})
     assert "<how_people_talk>" in msgs[1].content and msgs[1].content.count("</how_people_talk>") == 1
+
+
+def test_recurring_phrases_needs_many_people_and_days():
+    from datetime import timedelta
+    from bot.memory.bible import recurring_phrases
+    base = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    rows = [(7 + i % 4, base + timedelta(days=i), "bro the claw is humming again") for i in range(12)]
+    rows += [(7, base, "only alex says purple monkey dishwasher")] * 20  # one person only → not a server phrase
+    out = recurring_phrases(rows)
+    assert any("claw" in p for p in out) and not any("purple" in p for p in out)
+
+
+@pytest.mark.asyncio
+async def test_bible_builds_and_feeds_replies(env, tmp_path):
+    import asyncio as aio
+    from bot.memory.bible import ServerBible
+    db, privacy = env
+    ex, _ = extractor_for(db, privacy, [answer(
+        {"kind": "member", "about": ["ben"], "text": "keeps starting minecraft servers that die", "evidence": [0]},
+        {"kind": "member", "about": ["ben"], "text": "blames valorant lag for every loss", "evidence": [0]},
+        {"kind": "member", "about": ["ben"], "text": "says persona is overrated to start fights", "evidence": [3]},
+        {"kind": "lore", "about": [], "title": "the costco incident", "text": "ben vs the rotisserie chicken", "evidence": [2]},
+    )])
+    await ex.run_channel(10)
+    router = FakeRouter(["- the minecraft server necromancer\n- blames java", "a server about dying minecraft servers and costco"])
+    members = {uid: SimpleNamespace(display_name=n) for uid, n in NAMES.items()}
+    guild = SimpleNamespace(id=1, name="test", get_member=members.get, default_role=object(),
+                            text_channels=[SimpleNamespace(id=10, permissions_for=lambda role: SimpleNamespace(read_message_history=True))])
+    bot = SimpleNamespace(get_guild=lambda gid: guild, db=db, extractor=SimpleNamespace(router=router))
+    bible = ServerBible(bot, tmp_path)
+    assert bible.for_reply(1, [9]) == {"bible_overview": [], "bible_people": []}  # starts building in background
+    for _ in range(50):
+        await aio.sleep(0.05)
+        if bible._cache.get(1, {}).get("overview"):
+            break
+    out = bible.for_reply(1, [9, 7])
+    assert out["bible_overview"] == ["a server about dying minecraft servers and costco"]
+    assert out["bible_people"] == ["ben: the minecraft server necromancer / blames java"]
+    assert (tmp_path / "server_bible_1.json").exists()
+    assert "leave out health" in router.prompts[0][0].content
