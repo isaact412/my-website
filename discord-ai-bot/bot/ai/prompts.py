@@ -51,6 +51,13 @@ def sanitize(text: str) -> str:
     return text
 
 
+SERVER_SPECIFIC = (
+    "use what you know about this server: a real bit, running joke, phrase, someone's habit, or an old message "
+    "from the context above, whenever one fits. a reply that could have been said in any random discord is a fail. "
+    "talk like the people in <how_people_talk>, not like an ai."
+)
+
+
 def sanitize_long(text: str, limit: int = 2200) -> str:
     """Like sanitize, but for the longer bible text."""
     return _TAG_LIKE.sub("", text).replace("\r", " ").strip()[:limit]
@@ -118,11 +125,14 @@ def build_messages(
             "swearing, lowercase, message length, humor. copy the energy, not the exact words. "
             "you are one of them, not an ai commenting on them.\n" + "\n\n".join(parts) + "\n</how_people_talk>\n\n"
         )
+    # Order matters: models pay the most attention to what's closest to the end, so the recent chat
+    # comes first and the server knowledge sits right before the message being answered.
     user_block = (
-        f"{names_block}{bible_block}{memory_block}{voice_block}channel: #{sanitize(channel_name)}\n"
+        f"channel: #{sanitize(channel_name)}\n"
         f"<chat_log>\n{log_lines}\n</chat_log>\n\n"
+        f"{names_block}{bible_block}{memory_block}{voice_block}"
         f"<new_message author=\"{sanitize(author_name)}\">{sanitize(content) or '(no text)'}</new_message>"
-        f"{reply_note}\n\n{task}"
+        f"{reply_note}\n\n{task}\n{SERVER_SPECIFIC}"
     )
     return [ChatMessage("system", system_prompt(p, bot_name)), ChatMessage("user", user_block)]
 

@@ -312,3 +312,12 @@ def test_nicknames_file_and_prompt(tmp_path):
 def test_default_nicknames_file_loads():
     from bot.character.nicknames import Nicknames
     assert Nicknames().real_name("Finnygan") == "finn"
+
+
+def test_server_knowledge_sits_right_before_the_new_message():
+    from bot.ai.prompts import build_messages
+    from bot.character.personality import load_personality
+    body = build_messages(load_personality(), "bot", "general", [("dale", "yo")], "eli", "where's dale", None,
+                          {"whos_who": ["dale = watson"], "people": ["dale: always late"]})[1].content
+    assert body.index("</chat_log>") < body.index("who's who") < body.index("<memory>") < body.index("<new_message")
+    assert body.rstrip().endswith("not like an ai.")

@@ -72,6 +72,7 @@ class Responder:
             history, message.author.display_name, message.clean_content, replying_to, memory_lines, task,
         )
 
+        self._save_debug_prompt(prompt)
         self.budget.record(None if spontaneous else message.author.id)
         log.info("[AI] %s by %s in #%s", "spontaneous reply" if spontaneous else "reply requested",
                  message.author.id, getattr(message.channel, "name", "?"))
@@ -91,6 +92,14 @@ class Responder:
         await self._usage(message, result.provider, result.model, calls=1,
                           input_tokens=result.input_tokens, output_tokens=result.output_tokens)
         await self.send(message, text, spontaneous)
+
+    def _save_debug_prompt(self, prompt) -> None:
+        """Writes the exact prompt of the latest reply to data/last_prompt.txt, for checking what the AI was given."""
+        try:
+            path = self.db.path.parent / "last_prompt.txt"
+            path.write_text("\n\n".join(f"===== {m.role.upper()} =====\n{m.content}" for m in prompt), encoding="utf-8")
+        except OSError:
+            pass
 
     async def send(self, message: discord.Message, text: str, spontaneous: bool) -> None:
         """Handles the AI's special answers ([skip], [react:X]) and sends normal text."""
